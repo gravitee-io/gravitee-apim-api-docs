@@ -13,6 +13,25 @@
     container.appendChild(div);
   };
 
+  const setEmptyState = () => {
+    document.querySelector(".selectors").style.visibility = "hidden";
+    container.innerHTML = `
+      <div class="empty-state">
+        <h1 class="empty-state-title">No documentation loaded</h1>
+        <p class="empty-state-text">
+          You're looking at the source repository. The published documentation
+          is served from the <code>gh-pages</code> branch via GitHub Pages.
+        </p>
+        <div class="empty-state-actions">
+          <a class="empty-state-cta"
+             href="https://gravitee-io.github.io/gravitee-apim-api-docs/">
+            Open published documentation
+          </a>
+        </div>
+      </div>
+    `;
+  };
+
   const parseHash = () => {
     const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
     return { v: params.get("v"), api: params.get("api") };
@@ -112,20 +131,31 @@
   };
 
   const init = async () => {
+    let res;
     try {
-      const res = await fetch("specs/versions.json", { cache: "no-cache" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      manifest = await res.json();
+      res = await fetch("specs/versions.json", { cache: "no-cache" });
     } catch (e) {
       setPlaceholder("Failed to load specs/versions.json: " + e.message, true);
       return;
     }
 
+    if (res.status === 404) {
+      setEmptyState();
+      return;
+    }
+    if (!res.ok) {
+      setPlaceholder(`Failed to load specs/versions.json: HTTP ${res.status}`, true);
+      return;
+    }
+    try {
+      manifest = await res.json();
+    } catch (e) {
+      setPlaceholder("Invalid specs/versions.json: " + e.message, true);
+      return;
+    }
+
     if (!manifest.versions || manifest.versions.length === 0) {
-      setPlaceholder(
-        "No version ingested yet. Run scripts/ingest.sh to add one.",
-        true,
-      );
+      setEmptyState();
       return;
     }
 
