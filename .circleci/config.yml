@@ -95,11 +95,12 @@ jobs:
             - run:
                   name: Sync deliverables onto gh-pages worktree
                   command: |
-                      # rsync --delete keeps the gh-pages tree exactly aligned with main's static
-                      # site + the just-ingested specs.
-                      rsync -a --delete index.html publish/
-                      rsync -a --delete assets/ publish/assets/
-                      rsync -a --delete specs/ publish/specs/
+                      # We delete + recopy entire dirs to mimic `rsync --delete` and keep
+                      # gh-pages exactly aligned with main + the just-ingested specs.
+                      # Identical files produce no git diff, so this stays idempotent.
+                      cp index.html publish/
+                      rm -rf publish/assets && cp -r assets publish/assets
+                      rm -rf publish/specs && cp -r specs publish/specs
 
             - run:
                   name: Commit and push to gh-pages
@@ -130,8 +131,8 @@ jobs:
             - run:
                   name: Sync static site onto gh-pages worktree (specs/ untouched)
                   command: |
-                      rsync -a --delete index.html publish/
-                      rsync -a --delete assets/ publish/assets/
+                      cp index.html publish/
+                      rm -rf publish/assets && cp -r assets publish/assets
 
             - run:
                   name: Commit and push to gh-pages
