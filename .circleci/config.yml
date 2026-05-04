@@ -13,13 +13,12 @@ parameters:
         default: false
         description: "If true, run the ingest and stage the commit on gh-pages but do not push."
 
-jobs:
-    ingest:
-        docker:
-            - image: cimg/openjdk:17.0
-        environment:
-            VERSION: << pipeline.parameters.version >>
-            DRY_RUN: << pipeline.parameters.dry_run >>
+# --- Reusable steps ---------------------------------------------------------
+# Both workflows (ingest, deploy-static) need the same prelude: bot identity
+# set up, gh-pages branch checked out as a worktree at ./publish.
+commands:
+    setup-bot-and-gh-pages-worktree:
+        description: "Configure git as gravitee-bot and add gh-pages as a worktree at ./publish"
         steps:
             - checkout
             - add_ssh_keys:
@@ -48,6 +47,17 @@ jobs:
                           rm -rf publish/* publish/.[!.]* 2>/dev/null || true
                       fi
 
+# --- Jobs -------------------------------------------------------------------
+jobs:
+    ingest:
+        docker:
+            - image: cimg/openjdk:17.0
+        environment:
+            VERSION: << pipeline.parameters.version >>
+            DRY_RUN: << pipeline.parameters.dry_run >>
+        steps:
+            - setup-bot-and-gh-pages-worktree
+
             - run:
                   name: Carry forward previously-published specs into working tree
                   command: |
@@ -64,8 +74,7 @@ jobs:
                   name: Sync deliverables onto gh-pages worktree
                   command: |
                       # rsync --delete keeps the gh-pages tree exactly aligned with main's static
-                      # site + the just-ingested specs. Using --delete on assets/ catches removed
-                      # files (e.g. an old icon) without manual cleanup.
+                      # site + the just-ingested specs.
                       rsync -a --delete index.html publish/
                       rsync -a --delete assets/ publish/assets/
                       rsync -a --delete specs/ publish/specs/
@@ -87,14 +96,53 @@ jobs:
                       fi
                       git push origin gh-pages
 
+    # Deploys index.html + assets/ from main onto gh-pages without touching specs/.
+    # This lets UI/style fixes ship immediately, instead of waiting for the next
+    # ingestion (which only happens on APIM releases).
+    deploy-static:
+        docker:
+            - image: cimg/openjdk:17.0
+        steps:
+            - setup-bot-and-gh-pages-worktree
+
+            - run:
+                  name: Sync static site onto gh-pages worktree (specs/ untouched)
+                  command: |
+                      rsync -a --delete index.html publish/
+                      rsync -a --delete assets/ publish/assets/
+
+            - run:
+                  name: Commit and push to gh-pages
+                  command: |
+                      cd publish
+                      if [ -z "$(git status --porcelain)" ]; then
+                          echo "Static site already up to date on gh-pages."
+                          exit 0
+                      fi
+                      git add -A
+                      git commit -m "chore: deploy static site update [skip ci]"
+                      git push origin gh-pages
+
+# --- Workflows --------------------------------------------------------------
 workflows:
     # Triggered by an external API call (typically APIM's release pipeline) or
-    # manually from the CircleCI UI by setting the `version` parameter. Skipped
-    # otherwise so regular pushes to main don't run the ingest.
+    # manually from the CircleCI UI by setting the `version` parameter.
     ingest-on-dispatch:
         when:
             not:
                 equal: ["", << pipeline.parameters.version >>]
         jobs:
             - ingest:
+                  context: cicd-orchestrator
+
+    # Triggered by every push to main when no version parameter is set
+    # (so the ingest dispatcher never lands here). Branch filter on `main`
+    # ensures feature branches don't deploy.
+    deploy-static-on-main-push:
+        when:
+            and:
+                - equal: ["", << pipeline.parameters.version >>]
+                - equal: ["main", << pipeline.git.branch >>]
+        jobs:
+            - deploy-static:
                   context: cicd-orchestrator
