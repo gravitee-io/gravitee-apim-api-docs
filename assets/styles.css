@@ -1,0 +1,122 @@
+:root {
+  --bg: #0e1116;
+  --topbar-bg: #161b22;
+  --topbar-fg: #f0f6fc;
+  --topbar-sub: #8b949e;
+  --topbar-border: #30363d;
+  --accent: #86c440;
+  --topbar-height: 56px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #fff;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  height: var(--topbar-height);
+  padding: 0 20px;
+  background: var(--topbar-bg);
+  color: var(--topbar-fg);
+  border-bottom: 1px solid var(--topbar-border);
+  flex: 0 0 auto;
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.brand-name {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.brand-name::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+.brand-sub {
+  color: var(--topbar-sub);
+  font-size: 12px;
+  margin-left: 18px;
+}
+
+.selectors {
+  display: flex;
+  gap: 16px;
+}
+
+.selectors label {
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  color: var(--topbar-sub);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.selectors select {
+  margin-top: 3px;
+  background: #0d1117;
+  color: var(--topbar-fg);
+  border: 1px solid var(--topbar-border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 13px;
+  min-width: 200px;
+  cursor: pointer;
+}
+
+.selectors select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+main {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+elements-api {
+  display: block;
+  height: 100%;
+}
+
+.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #6e7681;
+  font-size: 14px;
+}
+
+.placeholder.error {
+  color: #cf222e;
+  flex-direction: column;
+  gap: 8px;
+}

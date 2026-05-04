@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gravitee APIM — API Documentation</title>
+    <link rel="stylesheet" href="https://unpkg.com/@stoplight/elements/styles.min.css" />
+    <link rel="stylesheet" href="assets/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-name">Gravitee APIM</span>
+        <span class="brand-sub">API Documentation</span>
+      </div>
+      <div class="selectors">
+        <label>
+          Version
+          <select id="version-select"></select>
+        </label>
+        <label>
+          API
+          <select id="api-select"></select>
+        </label>
+      </div>
+    </header>
+
+    <main id="doc-container">
+      <div id="placeholder" class="placeholder">Loading…</div>
+    </main>
+
+    <script src="https://unpkg.com/@stoplight/elements/web-components.min.js"></script>
+    <script src="assets/app.js"></script>
+  </body>
+</html>
