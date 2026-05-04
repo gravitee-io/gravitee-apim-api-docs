@@ -101,6 +101,14 @@ jobs:
                       cp index.html publish/
                       rm -rf publish/assets && cp -r assets publish/assets
                       rm -rf publish/specs && cp -r specs publish/specs
+                      # gh-pages must stay a pure deployable: prune anything that
+                      # is neither one of our deliverables nor the .git dir.
+                      find publish -mindepth 1 -maxdepth 1 \
+                          ! -name index.html \
+                          ! -name assets \
+                          ! -name specs \
+                          ! -name .git \
+                          -exec rm -rf {} +
 
             - run:
                   name: Commit and push to gh-pages
@@ -133,6 +141,14 @@ jobs:
                   command: |
                       cp index.html publish/
                       rm -rf publish/assets && cp -r assets publish/assets
+                      # gh-pages must stay a pure deployable: prune anything that
+                      # is neither one of our deliverables nor the .git dir.
+                      find publish -mindepth 1 -maxdepth 1 \
+                          ! -name index.html \
+                          ! -name assets \
+                          ! -name specs \
+                          ! -name .git \
+                          -exec rm -rf {} +
 
             - run:
                   name: Commit and push to gh-pages
@@ -156,6 +172,7 @@ workflows:
                 equal: ["", << pipeline.parameters.version >>]
         jobs:
             - ingest:
+                  name: ingest << pipeline.parameters.version >><<# pipeline.parameters.dry_run >> (dry-run)<</ pipeline.parameters.dry_run >>
                   context: cicd-orchestrator
 
     # Triggered by every push to main when no version parameter is set
