@@ -1,0 +1,100 @@
+version: 2.1
+
+orbs:
+    keeper: gravitee-io/keeper@0.7.0
+
+parameters:
+    version:
+        type: string
+        default: ""
+        description: "APIM version to ingest (e.g. 4.11.5). When non-empty, triggers the ingest workflow."
+    dry_run:
+        type: boolean
+        default: false
+        description: "If true, run the ingest and stage the commit on gh-pages but do not push."
+
+jobs:
+    ingest:
+        docker:
+            - image: cimg/openjdk:17.0
+        environment:
+            VERSION: << pipeline.parameters.version >>
+            DRY_RUN: << pipeline.parameters.dry_run >>
+        steps:
+            - checkout
+            - add_ssh_keys:
+                fingerprints:
+                  - ac:88:23:8f:c6:0f:7d:f0:fc:df:73:20:34:56:02:6c
+            - keeper/env-export:
+                  secret-url: keeper://IZd-yvsMopfQEa_0j1SDvg/field/login
+                  var-name: GIT_USER_NAME
+            - keeper/env-export:
+                  secret-url: keeper://IZd-yvsMopfQEa_0j1SDvg/custom_field/email
+                  var-name: GIT_USER_EMAIL
+            - run:
+                  name: Configure git identity (gravitee-bot)
+                  command: |
+                      git config --global user.name "${GIT_USER_NAME}"
+                      git config --global user.email "${GIT_USER_EMAIL}"
+            - run:
+                  name: Add gh-pages as a worktree (or bootstrap if missing)
+                  command: |
+                      if git ls-remote --exit-code --heads origin gh-pages >/dev/null; then
+                          git fetch origin gh-pages:gh-pages
+                          git worktree add publish gh-pages
+                      else
+                          echo "gh-pages does not exist yet on origin — creating an orphan branch."
+                          git worktree add --orphan -b gh-pages publish
+                          rm -rf publish/* publish/.[!.]* 2>/dev/null || true
+                      fi
+
+            - run:
+                  name: Carry forward previously-published specs into working tree
+                  command: |
+                      mkdir -p specs
+                      if [ -d publish/specs ]; then
+                          cp -a publish/specs/. specs/
+                      fi
+
+            - run:
+                  name: Ingest APIM $VERSION
+                  command: ./scripts/ingest.sh "$VERSION"
+
+            - run:
+                  name: Sync deliverables onto gh-pages worktree
+                  command: |
+                      # rsync --delete keeps the gh-pages tree exactly aligned with main's static
+                      # site + the just-ingested specs. Using --delete on assets/ catches removed
+                      # files (e.g. an old icon) without manual cleanup.
+                      rsync -a --delete index.html publish/
+                      rsync -a --delete assets/ publish/assets/
+                      rsync -a --delete specs/ publish/specs/
+
+            - run:
+                  name: Commit and push to gh-pages
+                  command: |
+                      cd publish
+                      if [ -z "$(git status --porcelain)" ]; then
+                          echo "No changes to deploy."
+                          exit 0
+                      fi
+                      git add -A
+                      git commit -m "chore: deploy APIM ${VERSION} [skip ci]"
+                      if [ "$DRY_RUN" = "true" ]; then
+                          echo "Dry-run mode — skipping push. Staged commit:"
+                          git log -1 --stat
+                          exit 0
+                      fi
+                      git push origin gh-pages
+
+workflows:
+    # Triggered by an external API call (typically APIM's release pipeline) or
+    # manually from the CircleCI UI by setting the `version` parameter. Skipped
+    # otherwise so regular pushes to main don't run the ingest.
+    ingest-on-dispatch:
+        when:
+            not:
+                equal: ["", << pipeline.parameters.version >>]
+        jobs:
+            - ingest:
+                  context: cicd-orchestrator
