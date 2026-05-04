@@ -58,6 +58,28 @@ jobs:
         steps:
             - setup-bot-and-gh-pages-worktree
 
+            # APIM releases publish to Sonatype's staging, which then syncs to
+            # Maven Central. The propagation typically takes 10-30 minutes and
+            # has no public progress signal. We poll the management-rest jar
+            # (the only one whose content depends on a build, hence the slowest
+            # to be ready) and proceed once it 200s. If the other three jars
+            # are not yet there, the ingest step itself will fail loudly — but
+            # in practice Sonatype publishes the whole batch atomically.
+            - run:
+                  name: Wait for $VERSION on Maven Central
+                  command: |
+                      ART_URL="https://repo.maven.apache.org/maven2/io/gravitee/apim/rest/api/management/gravitee-apim-rest-api-management-rest/${VERSION}/gravitee-apim-rest-api-management-rest-${VERSION}.jar"
+                      for i in $(seq 1 60); do
+                        if curl -fsI "$ART_URL" >/dev/null; then
+                          echo "Artifact available on Maven Central."
+                          exit 0
+                        fi
+                        echo "Not yet on Maven Central (attempt $i/60), retrying in 60s…"
+                        sleep 60
+                      done
+                      echo "ERROR: $ART_URL not available after 60 minutes — aborting." >&2
+                      exit 1
+
             - run:
                   name: Carry forward previously-published specs into working tree
                   command: |
