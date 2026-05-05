@@ -114,9 +114,13 @@
     const minors = [...minorGroups.keys()];
     const latestMinor = minors[0];
     for (const minor of minors) {
+      const latestPatch = minorGroups.get(minor)[0].version;
       const opt = document.createElement("option");
       opt.value = minor;
-      opt.textContent = minor === latestMinor ? `${minor} (latest)` : minor;
+      opt.textContent =
+        minor === latestMinor
+          ? `${minor} (${latestPatch}) - latest`
+          : `${minor} (${latestPatch})`;
       versionSelect.appendChild(opt);
     }
   };
