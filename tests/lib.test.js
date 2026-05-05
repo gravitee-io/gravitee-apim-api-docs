@@ -98,12 +98,19 @@ describe("resolveV", () => {
     expect(resolveV("4.10", manifest, groups)?.version).toBe("4.10.13");
   });
 
+  it("falls back to the latest patch of the same minor when full is unknown", () => {
+    // 4.11.99 doesn't exist, but 4.11 does — return the latest 4.11 patch.
+    expect(resolveV("4.11.99", manifest, groups)?.version).toBe("4.11.5");
+    // 4.10.0 doesn't exist, but 4.10 does — return the latest 4.10 patch.
+    expect(resolveV("4.10.0", manifest, groups)?.version).toBe("4.10.13");
+  });
+
   it("returns null for an unknown minor", () => {
     expect(resolveV("4.99", manifest, groups)).toBeNull();
   });
 
-  it("returns null for an unknown full version", () => {
-    expect(resolveV("4.11.99", manifest, groups)).toBeNull();
+  it("returns null when both full and minor are unknown", () => {
+    expect(resolveV("4.99.0", manifest, groups)).toBeNull();
   });
 
   it("returns null for null/empty input", () => {

@@ -33,13 +33,21 @@ export const groupByMinor = (versions) => {
 };
 
 // Resolve a `v` value to a manifest version object.
-//   "4.11.5" -> exact match (or null if absent)
-//   "4.11"   -> latest patch of the 4.11 minor (or null if minor unknown)
-//   anything else / null / unknown -> null (caller decides fallback)
+//   "4.11.5" -> exact match if it exists; otherwise the latest patch of
+//               the 4.11 minor if that minor exists; otherwise null.
+//   "4.11"   -> latest patch of the 4.11 minor (or null if minor unknown).
+//   anything else / null / unknown -> null (caller decides fallback).
+//
+// The full -> minor fallback keeps the user "in the same minor" when they
+// follow a deep link to a patch that no longer exists in the manifest
+// (e.g. an obsolete 4.8.20 link still lands on the latest 4.8 patch).
 export const resolveV = (v, manifest, minorGroups) => {
   if (!v) return null;
   if (/^\d+\.\d+\.\d+/.test(v)) {
-    return manifest.versions.find((entry) => entry.version === v) || null;
+    const exact = manifest.versions.find((entry) => entry.version === v);
+    if (exact) return exact;
+    const list = minorGroups.get(minorOf(v));
+    return list && list[0] ? list[0] : null;
   }
   if (/^\d+\.\d+$/.test(v)) {
     const list = minorGroups.get(v);
@@ -284,7 +292,16 @@ export const createApp = () => {
     let versionObj, vForUrl;
     if (resolved) {
       versionObj = resolved;
-      vForUrl = search.v;
+      // Preserve the URL form the user came in with when it points at the
+      // resolved version exactly (full match) or at its minor (sticky
+      // minor link). Otherwise we got here via a full -> minor fallback
+      // (e.g. ?v=4.8.20 resolved to the latest 4.8 patch), so rewrite the
+      // URL to the minor form to make the sticky link explicit.
+      const resolvedMinor = minorOf(resolved.version);
+      vForUrl =
+        search.v === resolved.version || search.v === resolvedMinor
+          ? search.v
+          : resolvedMinor;
     } else {
       const latestMinor = [...minorGroups.keys()][0];
       versionObj = minorGroups.get(latestMinor)[0];

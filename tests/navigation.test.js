@@ -127,8 +127,29 @@ describe("init: URL has ?v=<full>", () => {
     expect(versionSelect().value).toBe("4.11");
   });
 
-  it("falls back to latest minor when the explicit patch is unknown", async () => {
-    history.replaceState(null, "", "?v=4.11.99");
+  it("falls back to the same minor when the explicit patch is unknown", async () => {
+    // Asking for 4.10.99 should land on 4.10's latest patch (4.10.13)
+    // rather than jumping to the latest minor altogether — keeps the
+    // user in the version line they asked for.
+    history.replaceState(null, "", "?v=4.10.99");
+    const app = createApp();
+    await app.init();
+    expect(versionSelect().value).toBe("4.10");
+    expect(window.location.search).toMatch(/v=4\.10(?!\.)/);
+  });
+
+  it("rewrites the URL to the minor when the explicit patch is unknown", async () => {
+    history.replaceState(null, "", "?v=4.10.99");
+    const app = createApp();
+    await app.init();
+    // The URL form is rewritten to the minor — the requested patch was
+    // dropped because it isn't valid, but the user's chosen minor is kept.
+    expect(window.location.search).not.toMatch(/4\.10\.99/);
+    expect(window.location.search).toMatch(/v=4\.10(?!\.)/);
+  });
+
+  it("falls back to latest minor when both the patch and the minor are unknown", async () => {
+    history.replaceState(null, "", "?v=4.99.0");
     const app = createApp();
     await app.init();
     expect(versionSelect().value).toBe("4.11");
