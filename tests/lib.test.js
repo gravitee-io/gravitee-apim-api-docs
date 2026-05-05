@@ -4,8 +4,9 @@ import {
   compareSemverDesc,
   groupByMinor,
   resolveV,
-  parseHash,
-  setHash,
+  parseSearch,
+  setSearch,
+  migrateLegacyHash,
 } from "../assets/lib.js";
 
 describe("minorOf", () => {
@@ -116,49 +117,100 @@ describe("resolveV", () => {
   });
 });
 
-describe("parseHash", () => {
+describe("parseSearch", () => {
   beforeEach(() => {
     history.replaceState(null, "", window.location.pathname);
   });
 
-  it("returns null fields when hash is empty", () => {
-    expect(parseHash()).toEqual({ v: null, api: null });
+  it("returns null fields when search is empty", () => {
+    expect(parseSearch()).toEqual({ v: null, api: null });
   });
 
-  it("parses v and api from a #v=...&api=... hash", () => {
-    history.replaceState(null, "", "#v=4.11&api=portal");
-    expect(parseHash()).toEqual({ v: "4.11", api: "portal" });
+  it("parses v and api from a ?v=...&api=... search string", () => {
+    history.replaceState(null, "", "?v=4.11&api=portal");
+    expect(parseSearch()).toEqual({ v: "4.11", api: "portal" });
   });
 
-  it("handles a hash with only v", () => {
-    history.replaceState(null, "", "#v=4.11.5");
-    expect(parseHash()).toEqual({ v: "4.11.5", api: null });
+  it("handles a search with only v", () => {
+    history.replaceState(null, "", "?v=4.11.5");
+    expect(parseSearch()).toEqual({ v: "4.11.5", api: null });
   });
 
-  it("handles a hash with only api", () => {
-    history.replaceState(null, "", "#api=portal");
-    expect(parseHash()).toEqual({ v: null, api: "portal" });
+  it("handles a search with only api", () => {
+    history.replaceState(null, "", "?api=portal");
+    expect(parseSearch()).toEqual({ v: null, api: "portal" });
+  });
+
+  it("ignores the URL hash", () => {
+    history.replaceState(null, "", "?v=4.11#/operations/getApi");
+    expect(parseSearch()).toEqual({ v: "4.11", api: null });
   });
 });
 
-describe("setHash", () => {
+describe("setSearch", () => {
   beforeEach(() => {
     history.replaceState(null, "", window.location.pathname);
   });
 
-  it("writes both v and api into the hash", () => {
-    setHash("4.11", "portal");
-    expect(window.location.hash).toBe("#v=4.11&api=portal");
+  it("writes both v and api into the search string", () => {
+    setSearch("4.11", "portal");
+    expect(window.location.search).toBe("?v=4.11&api=portal");
   });
 
   it("omits empty values", () => {
-    setHash("4.11", null);
-    expect(window.location.hash).toBe("#v=4.11");
+    setSearch("4.11", null);
+    expect(window.location.search).toBe("?v=4.11");
   });
 
-  it("does nothing when the hash is already correct", () => {
+  it("preserves the existing hash so Elements navigation survives", () => {
+    history.replaceState(
+      null,
+      "",
+      window.location.pathname + "#/operations/getApi",
+    );
+    setSearch("4.11", "portal");
+    expect(window.location.search).toBe("?v=4.11&api=portal");
+    expect(window.location.hash).toBe("#/operations/getApi");
+  });
+
+  it("does nothing when the search string is already correct", () => {
+    history.replaceState(null, "", "?v=4.11&api=portal");
+    setSearch("4.11", "portal");
+    expect(window.location.search).toBe("?v=4.11&api=portal");
+  });
+});
+
+describe("migrateLegacyHash", () => {
+  beforeEach(() => {
+    history.replaceState(null, "", window.location.pathname);
+  });
+
+  it("migrates a legacy #v=...&api=... hash to query params", () => {
     history.replaceState(null, "", "#v=4.11&api=portal");
-    setHash("4.11", "portal");
-    expect(window.location.hash).toBe("#v=4.11&api=portal");
+    expect(migrateLegacyHash()).toBe(true);
+    expect(window.location.hash).toBe("");
+    expect(window.location.search).toBe("?v=4.11&api=portal");
+  });
+
+  it("migrates a legacy hash with only v", () => {
+    history.replaceState(null, "", "#v=4.10.13");
+    expect(migrateLegacyHash()).toBe(true);
+    expect(window.location.search).toBe("?v=4.10.13");
+  });
+
+  it("does nothing when the hash is empty", () => {
+    expect(migrateLegacyHash()).toBe(false);
+  });
+
+  it("leaves an Elements route alone (#/operations/...)", () => {
+    history.replaceState(null, "", "#/operations/getApi");
+    expect(migrateLegacyHash()).toBe(false);
+    expect(window.location.hash).toBe("#/operations/getApi");
+  });
+
+  it("ignores a hash that contains neither v nor api", () => {
+    history.replaceState(null, "", "#some-anchor");
+    expect(migrateLegacyHash()).toBe(false);
+    expect(window.location.hash).toBe("#some-anchor");
   });
 });

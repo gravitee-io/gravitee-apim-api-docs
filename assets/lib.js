@@ -49,22 +49,50 @@ export const resolveV = (v, manifest, minorGroups) => {
 };
 
 // ---------- URL helpers ----------
+//
+// Our state (selected version + API) lives in classic query parameters
+// (?v=4.11&api=portal). The URL hash is left for Stoplight Elements'
+// own router (which uses fragments like #/operations/getApi for in-spec
+// navigation).
 
-export const parseHash = () => {
-  const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+export const parseSearch = () => {
+  const params = new URLSearchParams(window.location.search);
   return { v: params.get("v"), api: params.get("api") };
 };
 
 // We keep whatever `v` form is passed (minor like "4.11" or full like
 // "4.11.5") — the URL is the contract, and we never silently rewrite it.
-export const setHash = (vValue, apiId) => {
+// The hash is preserved so Elements' navigation state survives.
+export const setSearch = (vValue, apiId) => {
   const params = new URLSearchParams();
   if (vValue) params.set("v", vValue);
   if (apiId) params.set("api", apiId);
-  const next = "#" + params.toString();
-  if (next !== window.location.hash) {
-    history.replaceState(null, "", next);
+  const newSearch = params.toString() ? "?" + params.toString() : "";
+  if (newSearch !== window.location.search) {
+    history.replaceState(
+      null,
+      "",
+      window.location.pathname + newSearch + window.location.hash,
+    );
   }
+};
+
+// Backward compat for legacy URLs that put our state in the hash
+// (#v=4.11&api=portal). If we detect that shape — anything that isn't an
+// Elements route (those start with '/') and contains v= or api= —
+// migrate it to query params and clear the hash. Returns true when a
+// migration happened.
+export const migrateLegacyHash = () => {
+  const hash = window.location.hash.replace(/^#/, "");
+  if (!hash || hash.startsWith("/")) return false;
+  const params = new URLSearchParams(hash);
+  if (!params.has("v") && !params.has("api")) return false;
+  history.replaceState(
+    null,
+    "",
+    window.location.pathname + "?" + params.toString(),
+  );
+  return true;
 };
 
 // ---------- application factory ----------
@@ -184,9 +212,9 @@ export const createApp = () => {
     if (apiSelect.value !== api.id) apiSelect.value = api.id;
   };
 
-  // Picking a different version always writes the minor in the hash, since
+  // Picking a different version always writes the minor in `?v`, since
   // that's what the selector exposes. Any explicit-patch context
-  // (#v=4.10.5) is intentionally lost — the user asked for a different
+  // (?v=4.10.5) is intentionally lost — the user asked for a different
   // version via the dropdown.
   const onVersionChange = () => {
     const minor = versionSelect.value;
@@ -202,16 +230,16 @@ export const createApp = () => {
     if (apiId) apiSelect.value = apiId;
 
     renderApi(newVersion, apiId);
-    setHash(minor, apiId);
+    setSearch(minor, apiId);
   };
 
   // Picking a different API preserves whatever `v` is currently in the URL,
   // so a deep link to a specific patch stays specific.
   const onApiChange = () => {
     const apiId = apiSelect.value;
-    const currentV = parseHash().v;
+    const currentV = parseSearch().v;
     renderApi(currentVersion, apiId);
-    setHash(currentV, apiId);
+    setSearch(currentV, apiId);
   };
 
   const init = async () => {
@@ -249,13 +277,14 @@ export const createApp = () => {
     minorGroups = groupByMinor(manifest.versions);
     populateVersions();
 
-    const hash = parseHash();
-    const resolved = resolveV(hash.v, manifest, minorGroups);
+    migrateLegacyHash();
+    const search = parseSearch();
+    const resolved = resolveV(search.v, manifest, minorGroups);
 
     let versionObj, vForUrl;
     if (resolved) {
       versionObj = resolved;
-      vForUrl = hash.v;
+      vForUrl = search.v;
     } else {
       const latestMinor = [...minorGroups.keys()][0];
       versionObj = minorGroups.get(latestMinor)[0];
@@ -268,12 +297,12 @@ export const createApp = () => {
     populateApis(versionObj);
 
     const apiId =
-      (hash.api && versionObj.apis.find((a) => a.id === hash.api)?.id) ||
+      (search.api && versionObj.apis.find((a) => a.id === search.api)?.id) ||
       apiSelect.options[0]?.value;
     if (apiId) apiSelect.value = apiId;
 
     renderApi(versionObj, apiId);
-    setHash(vForUrl, apiId);
+    setSearch(vForUrl, apiId);
 
     versionSelect.addEventListener("change", onVersionChange);
     apiSelect.addEventListener("change", onApiChange);

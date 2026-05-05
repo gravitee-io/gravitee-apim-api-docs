@@ -83,73 +83,95 @@ describe("init: URL has no v param", () => {
   it("writes the latest minor into the URL", async () => {
     const app = createApp();
     await app.init();
-    expect(window.location.hash).toMatch(/v=4\.11(?!\.)/);
+    expect(window.location.search).toMatch(/v=4\.11(?!\.)/);
   });
 
   it("selects the first API of that version", async () => {
     const app = createApp();
     await app.init();
     expect(apiSelect().value).toBe("automation");
-    expect(window.location.hash).toMatch(/api=automation/);
+    expect(window.location.search).toMatch(/api=automation/);
   });
 });
 
-describe("init: URL has #v=<minor>", () => {
+describe("init: URL has ?v=<minor>", () => {
   it("selects that minor and renders its latest patch", async () => {
-    history.replaceState(null, "", "#v=4.10");
+    history.replaceState(null, "", "?v=4.10");
     const app = createApp();
     await app.init();
     expect(versionSelect().value).toBe("4.10");
-    expect(window.location.hash).toMatch(/v=4\.10(?!\.)/);
+    expect(window.location.search).toMatch(/v=4\.10(?!\.)/);
   });
 
   it("falls back to latest minor when the requested minor is unknown", async () => {
-    history.replaceState(null, "", "#v=4.99");
+    history.replaceState(null, "", "?v=4.99");
     const app = createApp();
     await app.init();
     expect(versionSelect().value).toBe("4.11");
-    expect(window.location.hash).toMatch(/v=4\.11(?!\.)/);
+    expect(window.location.search).toMatch(/v=4\.11(?!\.)/);
   });
 });
 
-describe("init: URL has #v=<full>", () => {
+describe("init: URL has ?v=<full>", () => {
   it("preserves the explicit patch in the URL", async () => {
-    history.replaceState(null, "", "#v=4.11.3");
+    history.replaceState(null, "", "?v=4.11.3");
     const app = createApp();
     await app.init();
-    expect(window.location.hash).toMatch(/v=4\.11\.3/);
+    expect(window.location.search).toMatch(/v=4\.11\.3/);
   });
 
   it("still puts the selector on the corresponding minor", async () => {
-    history.replaceState(null, "", "#v=4.11.3");
+    history.replaceState(null, "", "?v=4.11.3");
     const app = createApp();
     await app.init();
     expect(versionSelect().value).toBe("4.11");
   });
 
   it("falls back to latest minor when the explicit patch is unknown", async () => {
-    history.replaceState(null, "", "#v=4.11.99");
+    history.replaceState(null, "", "?v=4.11.99");
     const app = createApp();
     await app.init();
     expect(versionSelect().value).toBe("4.11");
-    expect(window.location.hash).toMatch(/v=4\.11(?!\.)/);
+    expect(window.location.search).toMatch(/v=4\.11(?!\.)/);
   });
 });
 
-describe("init: URL has #v=...&api=...", () => {
+describe("init: URL has ?v=...&api=...", () => {
   it("honors the requested API when it exists", async () => {
-    history.replaceState(null, "", "#v=4.10&api=portal");
+    history.replaceState(null, "", "?v=4.10&api=portal");
     const app = createApp();
     await app.init();
     expect(apiSelect().value).toBe("portal");
-    expect(window.location.hash).toMatch(/api=portal/);
+    expect(window.location.search).toMatch(/api=portal/);
   });
 
   it("falls back to the first API when the requested API doesn't exist", async () => {
-    history.replaceState(null, "", "#v=4.9&api=portal");
+    history.replaceState(null, "", "?v=4.9&api=portal");
     const app = createApp();
     await app.init();
     expect(apiSelect().value).toBe("automation");
+  });
+});
+
+describe("init: legacy hash URL is migrated", () => {
+  it("rewrites #v=4.10&api=portal to ?v=4.10&api=portal", async () => {
+    history.replaceState(null, "", "#v=4.10&api=portal");
+    const app = createApp();
+    await app.init();
+    expect(window.location.hash).toBe("");
+    expect(window.location.search).toMatch(/v=4\.10(?!\.)/);
+    expect(window.location.search).toMatch(/api=portal/);
+    expect(versionSelect().value).toBe("4.10");
+    expect(apiSelect().value).toBe("portal");
+  });
+
+  it("preserves an Elements route hash (#/operations/...)", async () => {
+    history.replaceState(null, "", "#/operations/getApi");
+    const app = createApp();
+    await app.init();
+    // Hash untouched, query has the latest defaults.
+    expect(window.location.hash).toBe("#/operations/getApi");
+    expect(window.location.search).toMatch(/v=4\.11(?!\.)/);
   });
 });
 
@@ -161,23 +183,23 @@ describe("onVersionChange", () => {
     versionSelect().value = "4.10";
     app.onVersionChange();
 
-    expect(window.location.hash).toMatch(/v=4\.10(?!\.)/);
+    expect(window.location.search).toMatch(/v=4\.10(?!\.)/);
   });
 
   it("'falls back' from a full-version URL to a minor-shaped URL", async () => {
-    history.replaceState(null, "", "#v=4.11.3");
+    history.replaceState(null, "", "?v=4.11.3");
     const app = createApp();
     await app.init();
 
     versionSelect().value = "4.10";
     app.onVersionChange();
 
-    expect(window.location.hash).not.toMatch(/4\.11/);
-    expect(window.location.hash).toMatch(/v=4\.10(?!\.)/);
+    expect(window.location.search).not.toMatch(/4\.11/);
+    expect(window.location.search).toMatch(/v=4\.10(?!\.)/);
   });
 
   it("keeps the same API across versions when it still exists", async () => {
-    history.replaceState(null, "", "#v=4.11&api=portal");
+    history.replaceState(null, "", "?v=4.11&api=portal");
     const app = createApp();
     await app.init();
 
@@ -185,11 +207,11 @@ describe("onVersionChange", () => {
     app.onVersionChange();
 
     expect(apiSelect().value).toBe("portal");
-    expect(window.location.hash).toMatch(/api=portal/);
+    expect(window.location.search).toMatch(/api=portal/);
   });
 
   it("picks the first API when the previous one doesn't exist in the new version", async () => {
-    history.replaceState(null, "", "#v=4.11&api=portal");
+    history.replaceState(null, "", "?v=4.11&api=portal");
     const app = createApp();
     await app.init();
 
@@ -198,30 +220,45 @@ describe("onVersionChange", () => {
 
     expect(apiSelect().value).toBe("automation");
   });
+
+  it("preserves the URL hash so Elements' navigation survives a version switch", async () => {
+    history.replaceState(
+      null,
+      "",
+      window.location.pathname + "?v=4.11#/operations/getApi",
+    );
+    const app = createApp();
+    await app.init();
+
+    versionSelect().value = "4.10";
+    app.onVersionChange();
+
+    expect(window.location.hash).toBe("#/operations/getApi");
+  });
 });
 
 describe("onApiChange", () => {
   it("preserves the v param exactly as it appears in the URL", async () => {
-    history.replaceState(null, "", "#v=4.11.3&api=automation");
+    history.replaceState(null, "", "?v=4.11.3&api=automation");
     const app = createApp();
     await app.init();
 
     apiSelect().value = "portal";
     app.onApiChange();
 
-    expect(window.location.hash).toMatch(/v=4\.11\.3/);
-    expect(window.location.hash).toMatch(/api=portal/);
+    expect(window.location.search).toMatch(/v=4\.11\.3/);
+    expect(window.location.search).toMatch(/api=portal/);
   });
 
   it("preserves a minor-shaped v across an API change", async () => {
-    history.replaceState(null, "", "#v=4.10");
+    history.replaceState(null, "", "?v=4.10");
     const app = createApp();
     await app.init();
 
     apiSelect().value = "portal";
     app.onApiChange();
 
-    expect(window.location.hash).toMatch(/v=4\.10(?!\.)/);
-    expect(window.location.hash).toMatch(/api=portal/);
+    expect(window.location.search).toMatch(/v=4\.10(?!\.)/);
+    expect(window.location.search).toMatch(/api=portal/);
   });
 });
