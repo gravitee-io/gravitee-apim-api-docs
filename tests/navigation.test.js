@@ -43,6 +43,10 @@ const fakeManifest = {
 
 const PAGE_HTML = `
   <header class="topbar">
+    <div class="brand">
+      <span class="brand-name">Gravitee APIM</span>
+      <span class="brand-sub">API Documentation</span>
+    </div>
     <div class="selectors">
       <label>Version <select id="version-select"></select></label>
       <label>API <select id="api-select"></select></label>
@@ -255,6 +259,44 @@ describe("onVersionChange", () => {
     app.onVersionChange();
 
     expect(window.location.hash).toBe("#/operations/getApi");
+  });
+});
+
+describe("goHome", () => {
+  it("resets to latest minor and its first API", async () => {
+    history.replaceState(null, "", "?v=4.10&api=portal");
+    const app = createApp();
+    await app.init();
+
+    app.goHome();
+
+    expect(versionSelect().value).toBe("4.11");
+    expect(apiSelect().value).toBe("automation");
+    expect(window.location.search).toMatch(/v=4\.11(?!\.)/);
+    expect(window.location.search).toMatch(/api=automation/);
+  });
+
+  it("resets even when the URL had an exact patch", async () => {
+    history.replaceState(null, "", "?v=4.11.3");
+    const app = createApp();
+    await app.init();
+
+    app.goHome();
+
+    // The exact patch is dropped, URL is back to the minor form.
+    expect(window.location.search).not.toMatch(/4\.11\.3/);
+    expect(window.location.search).toMatch(/v=4\.11(?!\.)/);
+  });
+
+  it("is wired to a click on the .brand element", async () => {
+    history.replaceState(null, "", "?v=4.10&api=portal");
+    const app = createApp();
+    await app.init();
+
+    document.querySelector(".brand").click();
+
+    expect(versionSelect().value).toBe("4.11");
+    expect(window.location.search).toMatch(/v=4\.11(?!\.)/);
   });
 });
 
