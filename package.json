@@ -1,0 +1,14 @@
+{
+  "name": "gravitee-apim-api-docs",
+  "private": true,
+  "type": "module",
+  "description": "Static site aggregating Gravitee APIM REST API documentation across versions. The package.json is dev-only — it is pruned from the gh-pages deploy.",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.1",
+    "vitest": "^2.1.0"
+  }
+}
