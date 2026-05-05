@@ -4,6 +4,14 @@
   const container = document.getElementById("doc-container");
 
   let manifest = null;
+  // Map<minor (e.g. "4.11"), version[] sorted by patch desc>, with minor keys
+  // sorted from newest to oldest. Built once from manifest.versions.
+  let minorGroups = null;
+  // The manifest version object currently being displayed (full version, e.g.
+  // "4.11.5"). Read by onApiChange to re-render without re-resolving the hash.
+  let currentVersion = null;
+
+  // ---------- placeholders ----------
 
   const setPlaceholder = (text, isError = false) => {
     container.innerHTML = "";
@@ -32,14 +40,18 @@
     `;
   };
 
+  // ---------- hash ----------
+
   const parseHash = () => {
     const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
     return { v: params.get("v"), api: params.get("api") };
   };
 
-  const setHash = (version, apiId) => {
+  // We keep whatever `v` form is passed (minor like "4.11" or full like
+  // "4.11.5") — the URL is the contract, and we never silently rewrite it.
+  const setHash = (vValue, apiId) => {
     const params = new URLSearchParams();
-    if (version) params.set("v", version);
+    if (vValue) params.set("v", vValue);
     if (apiId) params.set("api", apiId);
     const next = "#" + params.toString();
     if (next !== window.location.hash) {
@@ -47,27 +59,74 @@
     }
   };
 
-  const findVersion = (versionId) =>
-    manifest.versions.find((v) => v.version === versionId);
+  // ---------- semver helpers ----------
 
+  const minorOf = (version) => version.split(".").slice(0, 2).join(".");
+
+  const compareSemverDesc = (a, b) => {
+    const ai = a.split(".").map((x) => parseInt(x, 10));
+    const bi = b.split(".").map((x) => parseInt(x, 10));
+    for (let i = 0; i < Math.max(ai.length, bi.length); i++) {
+      const d = (bi[i] || 0) - (ai[i] || 0);
+      if (d) return d;
+    }
+    return 0;
+  };
+
+  const groupByMinor = (versions) => {
+    const tmp = new Map();
+    for (const v of versions) {
+      const m = minorOf(v.version);
+      if (!tmp.has(m)) tmp.set(m, []);
+      tmp.get(m).push(v);
+    }
+    for (const list of tmp.values()) {
+      list.sort((a, b) => compareSemverDesc(a.version, b.version));
+    }
+    const sortedKeys = [...tmp.keys()].sort(compareSemverDesc);
+    const out = new Map();
+    for (const k of sortedKeys) out.set(k, tmp.get(k));
+    return out;
+  };
+
+  // Resolve a hash `v` value to a manifest version object.
+  //   "4.11.5" -> exact match (or null if absent)
+  //   "4.11"   -> latest patch of the 4.11 minor (or null if minor unknown)
+  //   anything else / null / unknown -> null (caller decides fallback)
+  const resolveHashV = (hashV) => {
+    if (!hashV) return null;
+    if (/^\d+\.\d+\.\d+/.test(hashV)) {
+      return manifest.versions.find((v) => v.version === hashV) || null;
+    }
+    if (/^\d+\.\d+$/.test(hashV)) {
+      const list = minorGroups.get(hashV);
+      return list && list[0] ? list[0] : null;
+    }
+    return null;
+  };
+
+  // ---------- selectors ----------
+
+  // The version selector's `value` is a minor (e.g. "4.11"), not a full
+  // version. The displayed minor always renders the latest patch.
   const populateVersions = () => {
     versionSelect.innerHTML = "";
-    for (const v of manifest.versions) {
+    const minors = [...minorGroups.keys()];
+    const latestMinor = minors[0];
+    for (const minor of minors) {
       const opt = document.createElement("option");
-      opt.value = v.version;
-      opt.textContent =
-        v.version === manifest.latest ? `${v.version} (latest)` : v.version;
+      opt.value = minor;
+      opt.textContent = minor === latestMinor ? `${minor} (latest)` : minor;
       versionSelect.appendChild(opt);
     }
   };
 
-  const populateApis = (version) => {
+  const populateApis = (versionObj) => {
     apiSelect.innerHTML = "";
-    const v = findVersion(version);
-    if (!v) return;
+    if (!versionObj) return;
 
     const groups = new Map();
-    for (const api of v.apis) {
+    for (const api of versionObj.apis) {
       const key = api.group || "_root";
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(api);
@@ -92,13 +151,15 @@
     }
   };
 
-  const renderApi = (version, apiId) => {
-    const v = findVersion(version);
-    if (!v) {
-      setPlaceholder(`Unknown version: ${version}`, true);
+  // ---------- render ----------
+
+  const renderApi = (versionObj, apiId) => {
+    if (!versionObj) {
+      setPlaceholder("Unknown version.", true);
       return;
     }
-    const api = v.apis.find((a) => a.id === apiId) || v.apis[0];
+    const api =
+      versionObj.apis.find((a) => a.id === apiId) || versionObj.apis[0];
     if (!api) {
       setPlaceholder("No API available for this version.", true);
       return;
@@ -116,19 +177,42 @@
     container.appendChild(el);
 
     if (apiSelect.value !== api.id) apiSelect.value = api.id;
-    setHash(version, api.id);
   };
 
+  // ---------- handlers ----------
+
+  // Picking a different version always writes the minor in the hash, since
+  // that's what the selector exposes. This is the "fall to minor" behavior:
+  // any explicit-patch context (#v=4.10.5) is lost when the user uses the
+  // dropdown — which is correct since they asked for a different version.
   const onVersionChange = () => {
-    const version = versionSelect.value;
-    populateApis(version);
-    const firstApi = apiSelect.options[0]?.value;
-    if (firstApi) renderApi(version, firstApi);
+    const minor = versionSelect.value;
+    const newVersion = minorGroups.get(minor)?.[0];
+    if (!newVersion) return;
+    currentVersion = newVersion;
+
+    const previousApiId = apiSelect.value;
+    populateApis(newVersion);
+    const apiId =
+      newVersion.apis.find((a) => a.id === previousApiId)?.id ||
+      apiSelect.options[0]?.value;
+    if (apiId) apiSelect.value = apiId;
+
+    renderApi(newVersion, apiId);
+    setHash(minor, apiId);
   };
 
+  // Picking a different API preserves whatever `v` is currently in the URL,
+  // so a deep link to a specific patch stays specific even after navigating
+  // between APIs.
   const onApiChange = () => {
-    renderApi(versionSelect.value, apiSelect.value);
+    const apiId = apiSelect.value;
+    const currentV = parseHash().v;
+    renderApi(currentVersion, apiId);
+    setHash(currentV, apiId);
   };
+
+  // ---------- init ----------
 
   const init = async () => {
     let res;
@@ -144,7 +228,10 @@
       return;
     }
     if (!res.ok) {
-      setPlaceholder(`Failed to load specs/versions.json: HTTP ${res.status}`, true);
+      setPlaceholder(
+        `Failed to load specs/versions.json: HTTP ${res.status}`,
+        true,
+      );
       return;
     }
     try {
@@ -159,23 +246,37 @@
       return;
     }
 
+    minorGroups = groupByMinor(manifest.versions);
     populateVersions();
 
     const hash = parseHash();
-    const initialVersion =
-      (hash.v && findVersion(hash.v)?.version) ||
-      manifest.latest ||
-      manifest.versions[0].version;
-    versionSelect.value = initialVersion;
-    populateApis(initialVersion);
+    const resolved = resolveHashV(hash.v);
 
-    const initialApi =
-      (hash.api &&
-        findVersion(initialVersion).apis.find((a) => a.id === hash.api)?.id) ||
+    // If the URL points to something resolvable, honor its exact form
+    // (preserves "4.11" vs "4.11.5" intent). Otherwise fall back to latest
+    // minor with a minor-shaped URL.
+    let versionObj, vForUrl;
+    if (resolved) {
+      versionObj = resolved;
+      vForUrl = hash.v;
+    } else {
+      const latestMinor = [...minorGroups.keys()][0];
+      versionObj = minorGroups.get(latestMinor)[0];
+      vForUrl = latestMinor;
+    }
+
+    currentVersion = versionObj;
+    versionSelect.value = minorOf(versionObj.version);
+
+    populateApis(versionObj);
+
+    const apiId =
+      (hash.api && versionObj.apis.find((a) => a.id === hash.api)?.id) ||
       apiSelect.options[0]?.value;
-    if (initialApi) apiSelect.value = initialApi;
+    if (apiId) apiSelect.value = apiId;
 
-    renderApi(initialVersion, initialApi);
+    renderApi(versionObj, apiId);
+    setHash(vForUrl, apiId);
 
     versionSelect.addEventListener("change", onVersionChange);
     apiSelect.addEventListener("change", onApiChange);
