@@ -250,6 +250,21 @@ export const createApp = () => {
     setSearch(currentV, apiId);
   };
 
+  // Reset to the default state: latest minor, first API of that version.
+  // Wired to a click on the brand area, used like a "home" link.
+  const goHome = () => {
+    if (!minorGroups) return;
+    const latestMinor = [...minorGroups.keys()][0];
+    const versionObj = minorGroups.get(latestMinor)[0];
+    currentVersion = versionObj;
+    versionSelect.value = latestMinor;
+    populateApis(versionObj);
+    const apiId = apiSelect.options[0]?.value;
+    if (apiId) apiSelect.value = apiId;
+    renderApi(versionObj, apiId);
+    setSearch(latestMinor, apiId);
+  };
+
   const init = async () => {
     let res;
     try {
@@ -323,7 +338,9 @@ export const createApp = () => {
 
     versionSelect.addEventListener("change", onVersionChange);
     apiSelect.addEventListener("change", onApiChange);
+    const brand = document.querySelector(".brand");
+    if (brand) brand.addEventListener("click", goHome);
   };
 
-  return { init, onVersionChange, onApiChange };
+  return { init, onVersionChange, onApiChange, goHome };
 };
