@@ -158,8 +158,34 @@ jobs:
                           echo "Static site already up to date on gh-pages."
                           exit 0
                       fi
+                      CUR_SHA=$(git -C .. rev-parse HEAD)
+                      # Find the SHA of main from the previous static-deploy
+                      # commit. We grep for the static-deploy subject so an
+                      # ingest commit between two deploys doesn't break the
+                      # chain.
+                      PREV_MSG=$(git log -1 --grep='^chore: deploy static site update' --pretty=%B || true)
+                      PREV_SHA=$(echo "$PREV_MSG" | sed -nE 's/^Source: main@([a-f0-9]+)$/\1/p' | head -1)
+                      if [ -n "$PREV_SHA" ] && git -C .. cat-file -e "$PREV_SHA" 2>/dev/null; then
+                          COMMIT_LIST=$(git -C .. log --oneline "${PREV_SHA}..${CUR_SHA}" -- index.html assets)
+                      else
+                          COMMIT_LIST=""
+                      fi
                       git add -A
-                      git commit -m "chore: deploy static site update [skip ci]"
+                      # Build the message via multiple -m flags (each one is a
+                      # paragraph). printf preserves real newlines in the
+                      # commit list so we keep YAML free of embedded
+                      # newlines.
+                      if [ -z "$COMMIT_LIST" ]; then
+                          git commit \
+                              -m "chore: deploy static site update [skip ci]" \
+                              -m "Source: main@${CUR_SHA}"
+                      else
+                          BODY_LIST=$(printf 'Includes commits from main:\n%s' "$COMMIT_LIST")
+                          git commit \
+                              -m "chore: deploy static site update [skip ci]" \
+                              -m "Source: main@${CUR_SHA}" \
+                              -m "$BODY_LIST"
+                      fi
                       git push origin gh-pages
 
 # --- Workflows --------------------------------------------------------------
