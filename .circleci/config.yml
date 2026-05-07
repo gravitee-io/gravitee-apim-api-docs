@@ -103,10 +103,13 @@ jobs:
                       rm -rf publish/specs && cp -r specs publish/specs
                       # gh-pages must stay a pure deployable: prune anything that
                       # is neither one of our deliverables nor the .git dir.
+                      # CNAME is added by GitHub Pages when a custom domain
+                      # is configured — must be preserved across deploys.
                       find publish -mindepth 1 -maxdepth 1 \
                           ! -name index.html \
                           ! -name assets \
                           ! -name specs \
+                          ! -name CNAME \
                           ! -name .git \
                           -exec rm -rf {} +
 
@@ -143,10 +146,13 @@ jobs:
                       rm -rf publish/assets && cp -r assets publish/assets
                       # gh-pages must stay a pure deployable: prune anything that
                       # is neither one of our deliverables nor the .git dir.
+                      # CNAME is added by GitHub Pages when a custom domain
+                      # is configured — must be preserved across deploys.
                       find publish -mindepth 1 -maxdepth 1 \
                           ! -name index.html \
                           ! -name assets \
                           ! -name specs \
+                          ! -name CNAME \
                           ! -name .git \
                           -exec rm -rf {} +
 
