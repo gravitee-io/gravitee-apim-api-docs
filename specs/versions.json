@@ -218,6 +218,63 @@
       ]
     },
     {
+      "version": "4.9.20",
+      "ingestedAt": "2026-05-19",
+      "apis": [
+        {
+          "id": "automation",
+          "label": "Automation",
+          "spec": "4.9.20/automation.yaml"
+        },
+        {
+          "id": "portal",
+          "label": "Portal",
+          "spec": "4.9.20/portal.yaml"
+        },
+        {
+          "id": "management",
+          "label": "Management (v1)",
+          "spec": "4.9.20/management.yaml"
+        },
+        {
+          "id": "mgmt-v2-apis",
+          "label": "APIs",
+          "spec": "4.9.20/management-v2/openapi-apis.yaml",
+          "group": "Management v2"
+        },
+        {
+          "id": "mgmt-v2-environments",
+          "label": "Environments",
+          "spec": "4.9.20/management-v2/openapi-environments.yaml",
+          "group": "Management v2"
+        },
+        {
+          "id": "mgmt-v2-installation",
+          "label": "Installation",
+          "spec": "4.9.20/management-v2/openapi-installation.yaml",
+          "group": "Management v2"
+        },
+        {
+          "id": "mgmt-v2-plugins",
+          "label": "Plugins",
+          "spec": "4.9.20/management-v2/openapi-plugins.yaml",
+          "group": "Management v2"
+        },
+        {
+          "id": "mgmt-v2-ui",
+          "label": "UI",
+          "spec": "4.9.20/management-v2/openapi-ui.yaml",
+          "group": "Management v2"
+        },
+        {
+          "id": "mgmt-v2-users",
+          "label": "Users",
+          "spec": "4.9.20/management-v2/openapi-users.yaml",
+          "group": "Management v2"
+        }
+      ]
+    },
+    {
       "version": "4.10.13",
       "ingestedAt": "2026-05-04",
       "apis": [
