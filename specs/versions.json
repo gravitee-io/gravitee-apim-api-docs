@@ -104,6 +104,57 @@
       ]
     },
     {
+      "version": "4.8.27",
+      "ingestedAt": "2026-05-19",
+      "apis": [
+        {
+          "id": "automation",
+          "label": "Automation",
+          "spec": "4.8.27/automation.yaml"
+        },
+        {
+          "id": "portal",
+          "label": "Portal",
+          "spec": "4.8.27/portal.yaml"
+        },
+        {
+          "id": "management",
+          "label": "Management (v1)",
+          "spec": "4.8.27/management.yaml"
+        },
+        {
+          "id": "mgmt-v2-apis",
+          "label": "APIs",
+          "spec": "4.8.27/management-v2/openapi-apis.yaml",
+          "group": "Management v2"
+        },
+        {
+          "id": "mgmt-v2-environments",
+          "label": "Environments",
+          "spec": "4.8.27/management-v2/openapi-environments.yaml",
+          "group": "Management v2"
+        },
+        {
+          "id": "mgmt-v2-installation",
+          "label": "Installation",
+          "spec": "4.8.27/management-v2/openapi-installation.yaml",
+          "group": "Management v2"
+        },
+        {
+          "id": "mgmt-v2-plugins",
+          "label": "Plugins",
+          "spec": "4.8.27/management-v2/openapi-plugins.yaml",
+          "group": "Management v2"
+        },
+        {
+          "id": "mgmt-v2-ui",
+          "label": "UI",
+          "spec": "4.8.27/management-v2/openapi-ui.yaml",
+          "group": "Management v2"
+        }
+      ]
+    },
+    {
       "version": "4.9.18",
       "ingestedAt": "2026-05-04",
       "apis": [
