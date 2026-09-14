@@ -3,12 +3,17 @@
 # Ingest one APIM version into specs/<version>/ by extracting OpenAPI files
 # from published Maven jars (no source checkout, no Maven build of APIM).
 #
-# Usage: scripts/ingest.sh <version>
+# Usage: scripts/ingest.sh <version> [core-version]
 #   e.g. scripts/ingest.sh 4.11.5
+#        scripts/ingest.sh 4.13.4 4.13.1
+#
+# <version> is what the site publishes under; [core-version] is what to download.
+# The jars come from APIM's core reactor, which releases apart from the product
+# from 4.13 on, so the two numbers stop agreeing. Omitted, they are the same.
 #
 # Pipeline overview:
 #   1. Download 4 published jars from Maven (Gravitee Nexus / Maven Central)
-#      via `mvn dependency:copy` into a tmp dir.
+#      via `mvn dependency:copy` into a tmp dir, at <core-version>.
 #   2. Unzip the OpenAPI yaml files we care about into specs/<version>/.
 #   3. Re-generate specs/versions.json so the static site picks up this version.
 #
@@ -21,12 +26,13 @@ set -euo pipefail
 
 # --- 1. Argument parsing ---------------------------------------------------
 
-if [[ $# -ne 1 ]]; then
-  echo "Usage: $0 <version>" >&2
+if [[ $# -lt 1 || $# -gt 2 ]]; then
+  echo "Usage: $0 <version> [core-version]" >&2
   exit 2
 fi
 
 VERSION="$1"
+CORE_VERSION="${2:-$VERSION}"   # what to download; defaults to what we publish under
 
 # Resolve the repo root from the script location, so the script works whether
 # you call it as ./scripts/ingest.sh or from anywhere else.
@@ -68,16 +74,20 @@ trap 'rm -rf "$TMP"' EXIT
 #                              we can predict the path below
 fetch_jar() {
   local g=$1 a=$2
-  echo "  [fetch] $g:$a:$VERSION"
+  echo "  [fetch] $g:$a:$CORE_VERSION"
   mvn -B -q dependency:copy \
-    -Dartifact="${g}:${a}:${VERSION}:jar" \
+    -Dartifact="${g}:${a}:${CORE_VERSION}:jar" \
     -DoutputDirectory="$TMP" \
     -Dmdep.stripVersion=false
 }
 
 # --- 4. Prepare the destination -------------------------------------------
 
-echo "[ingest] version $VERSION"
+if [[ "$CORE_VERSION" != "$VERSION" ]]; then
+  echo "[ingest] version $VERSION, from core $CORE_VERSION"
+else
+  echo "[ingest] version $VERSION"
+fi
 
 # Wipe any previous content for this version so an ingest is idempotent
 # (no leftover files from a previous run).
@@ -95,10 +105,10 @@ done
 #
 # Predicted jar paths in $TMP (Maven names them <artifactId>-<version>.jar
 # because we passed -Dmdep.stripVersion=false above).
-JAR_AUTO="$TMP/gravitee-apim-rest-api-automation-rest-$VERSION.jar"
-JAR_PORTAL="$TMP/gravitee-apim-rest-api-portal-rest-$VERSION.jar"
-JAR_MGMT="$TMP/gravitee-apim-rest-api-management-rest-$VERSION.jar"
-JAR_V2="$TMP/gravitee-apim-rest-api-management-v2-rest-$VERSION.jar"
+JAR_AUTO="$TMP/gravitee-apim-rest-api-automation-rest-$CORE_VERSION.jar"
+JAR_PORTAL="$TMP/gravitee-apim-rest-api-portal-rest-$CORE_VERSION.jar"
+JAR_MGMT="$TMP/gravitee-apim-rest-api-management-rest-$CORE_VERSION.jar"
+JAR_V2="$TMP/gravitee-apim-rest-api-management-v2-rest-$CORE_VERSION.jar"
 
 # `unzip -j` flattens directories (we don't want jar internals on disk).
 # `-o` overwrites without prompting. We rename each file to a stable name
