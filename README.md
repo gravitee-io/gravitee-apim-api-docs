@@ -24,12 +24,16 @@ python3 -m http.server 8080
 ## Ingest a new version
 
 ```bash
-./scripts/ingest.sh <version>
+./scripts/ingest.sh <version> [core-version]
 # example:
 ./scripts/ingest.sh 4.11.5
+# when the jars carry another number than the product:
+./scripts/ingest.sh 4.13.4 4.13.1
 ```
 
 The script downloads the four APIM REST API jars from Maven (Gravitee Nexus / Maven Central), extracts the embedded OpenAPI yaml files into `specs/<version>/`, and updates `specs/versions.json`. No APIM source checkout or local Maven build is required.
+
+The jars belong to APIM's core reactor, which releases apart from the product from 4.13 on: the specs of product `4.13.4` may well sit in core `4.13.1`. The second argument says which number to download; the site keeps publishing under the first. Leave it out and the two are the same, which is what every version up to 4.12 does.
 
 ## APIs included
 
@@ -42,12 +46,12 @@ The script downloads the four APIM REST API jars from Maven (Gravitee Nexus / Ma
 
 Two workflows in `.circleci/config.yml`:
 
-1. **`ingest`** — triggered by an external API call (typically from APIM's release pipeline) with a `version` parameter. Runs the ingest script, syncs the result onto `gh-pages`, and commits as `gravitee-bot`. Can also be triggered manually from the CircleCI UI. The job first polls Maven Central for up to one hour to wait for Sonatype's release to propagate; this absorbs the typical 10–30 min sync delay between an APIM release and the artifact becoming downloadable.
+1. **`ingest`** — triggered by an external API call (typically from APIM's release pipeline) with a `version` parameter, and optionally a `core_version` one when the jars carry another number. Runs the ingest script, syncs the result onto `gh-pages`, and commits as `gravitee-bot`. Can also be triggered manually from the CircleCI UI. The job first polls Maven Central for up to one hour to wait for Sonatype's release to propagate; this absorbs the typical 10–30 min sync delay between an APIM release and the artifact becoming downloadable.
 2. **`deploy-static`** — triggered on every push to `main`. Syncs `index.html` and `assets/` onto `gh-pages` without touching `specs/`, so UI changes ship immediately.
 
 ### Triggering an ingestion manually
 
-From the CircleCI UI: open the docs project, "Trigger Pipeline", set parameter `version` to the target APIM version (e.g. `4.11.5`), run.
+From the CircleCI UI: open the docs project, "Trigger Pipeline", set parameter `version` to the target APIM version (e.g. `4.11.5`), run. Add `core_version` only if the REST API jars of that release were published under a different number.
 
 Equivalent API call:
 

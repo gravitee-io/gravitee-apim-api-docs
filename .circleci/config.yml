@@ -8,6 +8,14 @@ parameters:
         type: string
         default: ""
         description: "APIM version to ingest (e.g. 4.11.5). When non-empty, triggers the ingest workflow."
+    core_version:
+        type: string
+        default: ""
+        description: >
+            Version of the APIM core reactor to download the REST API jars from. Since the two
+            reactors release apart, the jars only exist under the core's number while the site
+            publishes under the product's. Empty means they are the same, which is true of every
+            release before the split and of a manual run.
     dry_run:
         type: boolean
         default: false
@@ -54,6 +62,7 @@ jobs:
             - image: cimg/openjdk:17.0
         environment:
             VERSION: << pipeline.parameters.version >>
+            CORE_VERSION: << pipeline.parameters.core_version >>
             DRY_RUN: << pipeline.parameters.dry_run >>
         steps:
             - setup-bot-and-gh-pages-worktree
@@ -66,9 +75,13 @@ jobs:
             # are not yet there, the ingest step itself will fail loudly — but
             # in practice Sonatype publishes the whole batch atomically.
             - run:
-                  name: Wait for $VERSION on Maven Central
+                  name: Wait for the core jars on Maven Central
                   command: |
-                      ART_URL="https://repo.maven.apache.org/maven2/io/gravitee/apim/rest/api/management/gravitee-apim-rest-api-management-rest/${VERSION}/gravitee-apim-rest-api-management-rest-${VERSION}.jar"
+                      # The jars carry the core's version, not the product's, and the two differ
+                      # once the reactors release apart. Empty means they are still the same.
+                      FETCH="${CORE_VERSION:-$VERSION}"
+                      echo "Waiting for $FETCH (publishing under $VERSION)."
+                      ART_URL="https://repo.maven.apache.org/maven2/io/gravitee/apim/rest/api/management/gravitee-apim-rest-api-management-rest/${FETCH}/gravitee-apim-rest-api-management-rest-${FETCH}.jar"
                       for i in $(seq 1 60); do
                         if curl -fsI "$ART_URL" >/dev/null; then
                           echo "Artifact available on Maven Central."
@@ -77,7 +90,8 @@ jobs:
                         echo "Not yet on Maven Central (attempt $i/60), retrying in 60s…"
                         sleep 60
                       done
-                      echo "ERROR: $ART_URL not available after 60 minutes — aborting." >&2
+                      echo "ERROR: core $FETCH not on Maven Central after 60 minutes — aborting." >&2
+                      echo "Looked for $ART_URL" >&2
                       exit 1
 
             - run:
@@ -90,7 +104,7 @@ jobs:
 
             - run:
                   name: Ingest APIM $VERSION
-                  command: ./scripts/ingest.sh "$VERSION"
+                  command: ./scripts/ingest.sh "$VERSION" "${CORE_VERSION:-$VERSION}"
 
             - run:
                   name: Sync deliverables onto gh-pages worktree
