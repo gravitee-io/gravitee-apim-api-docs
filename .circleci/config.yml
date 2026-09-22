@@ -67,32 +67,21 @@ jobs:
         steps:
             - setup-bot-and-gh-pages-worktree
 
-            # APIM releases publish to Sonatype's staging, which then syncs to
-            # Maven Central. The propagation typically takes 10-30 minutes and
-            # has no public progress signal. We poll the management-rest jar
-            # (the only one whose content depends on a build, hence the slowest
-            # to be ready) and proceed once it 200s. If the other three jars
-            # are not yet there, the ingest step itself will fail loudly — but
-            # in practice Sonatype publishes the whole batch atomically.
+            # No wait before the ingest: this pipeline is triggered once the release job has
+            # deployed to the feed, and a feed has no propagation to absorb — unlike the
+            # Sonatype staging this used to poll for up to an hour. A jar that is somehow
+            # missing fails the ingest itself, with the coordinates in the message.
+            - keeper/install
             - run:
-                  name: Wait for the core jars on Maven Central
+                  name: Point Maven at the Azure feed
+                  # The secrets are read here rather than inside the script: fetching them is
+                  # the pipeline's business, and it keeps the script runnable by hand with a
+                  # personal access token. They stay in this step's environment.
                   command: |
-                      # The jars carry the core's version, not the product's, and the two differ
-                      # once the reactors release apart. Empty means they are still the same.
-                      FETCH="${CORE_VERSION:-$VERSION}"
-                      echo "Waiting for $FETCH (publishing under $VERSION)."
-                      ART_URL="https://repo.maven.apache.org/maven2/io/gravitee/apim/rest/api/management/gravitee-apim-rest-api-management-rest/${FETCH}/gravitee-apim-rest-api-management-rest-${FETCH}.jar"
-                      for i in $(seq 1 60); do
-                        if curl -fsI "$ART_URL" >/dev/null; then
-                          echo "Artifact available on Maven Central."
-                          exit 0
-                        fi
-                        echo "Not yet on Maven Central (attempt $i/60), retrying in 60s…"
-                        sleep 60
-                      done
-                      echo "ERROR: core $FETCH not on Maven Central after 60 minutes — aborting." >&2
-                      echo "Looked for $ART_URL" >&2
-                      exit 1
+                      export AZURE_CLIENT_ID=$(ksm secret notation keeper://UryantA7MvZe8fkWwcUt8g/field/login)
+                      export AZURE_CLIENT_SECRET=$(ksm secret notation keeper://UryantA7MvZe8fkWwcUt8g/field/password)
+                      export AZURE_TENANT=$(ksm secret notation keeper://UryantA7MvZe8fkWwcUt8g/custom_field/tenant)
+                      ./scripts/setup-maven-feed.sh
 
             - run:
                   name: Carry forward previously-published specs into working tree
