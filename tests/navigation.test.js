@@ -353,14 +353,14 @@ describe("renderApi: Portal API sections", () => {
     vi.stubGlobal("jsyaml", { load: (text) => JSON.parse(text) });
   });
 
-  it("hands Elements the Portal spec grouped into Next Gen and Legacy sections", async () => {
+  it("hands Elements the Portal spec with its classic operations in Legacy sections", async () => {
     stubFetch(() => ({ ok: true, status: 200, text: async () => JSON.stringify(portalSpec) }));
     history.replaceState(null, "", "?api=portal");
     await createApp().init();
 
     await vi.waitFor(() => expect(renderedApi()).not.toBeNull());
     const document = JSON.parse(renderedApi().getAttribute("apiDescriptionDocument"));
-    expect(document.paths["/apis"].get.tags).toEqual(["Legacy (Classic) · Api"]);
+    expect(document.paths["/apis"].get.tags).toEqual(["Legacy · Api"]);
     expect(renderedApi().hasAttribute("apiDescriptionUrl")).toBe(false);
   });
 

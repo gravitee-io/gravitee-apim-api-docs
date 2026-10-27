@@ -107,45 +107,48 @@ export const migrateLegacyHash = () => {
 //
 // From 4.14, every Portal API operation declares which developer portal
 // calls it (`x-gravitee-portal`: classic, next or both). Elements builds its
-// sidebar from the tags, so we prefix them with a section: custom portals
-// must find the Next Gen operations first, the Legacy ones last.
+// sidebar from the tags, so the classic-only operations move to "Legacy"
+// sections listed last: custom portals must not build on them.
 
 const PORTAL_EXTENSION = "x-gravitee-portal";
-const NEXT_GEN_SECTION = "Next Gen";
-const LEGACY_SECTION = "Legacy (Classic)";
+const LEGACY = "Legacy";
 const HTTP_METHODS = ["get", "put", "post", "delete", "options", "head", "patch", "trace"];
 const PORTAL_SECTIONS_INTRO =
-  `> **Building your own developer portal?** Use the **${NEXT_GEN_SECTION}** operations. ` +
-  `The **${LEGACY_SECTION}** operations only serve the classic developer portal.`;
+  `> **Building your own developer portal?** The operations in the **${LEGACY}** sections ` +
+  `only serve the classic developer portal. Build on the other operations.`;
 
 const operationsOf = (spec) =>
   Object.values(spec.paths || {}).flatMap((item) =>
     HTTP_METHODS.filter((method) => item[method]).map((method) => item[method]),
   );
 
+const legacyTag = (tag) => `${LEGACY} · ${tag}`;
+
 export const groupOperationsByPortal = (spec) => {
   if (!operationsOf(spec).some((op) => op[PORTAL_EXTENSION])) return spec;
 
   const grouped = structuredClone(spec);
-  const tagsBySection = { [NEXT_GEN_SECTION]: new Set(), [LEGACY_SECTION]: new Set() };
+  const currentTags = new Set();
+  const legacyTags = new Set();
   for (const op of operationsOf(grouped)) {
-    const section = op[PORTAL_EXTENSION] === "classic" ? LEGACY_SECTION : NEXT_GEN_SECTION;
-    op.tags = (op.tags || []).map((tag) => {
-      tagsBySection[section].add(tag);
-      return `${section} · ${tag}`;
-    });
+    const tags = op.tags || [];
+    if (op[PORTAL_EXTENSION] === "classic") {
+      tags.forEach((tag) => legacyTags.add(tag));
+      op.tags = tags.map(legacyTag);
+    } else {
+      tags.forEach((tag) => currentTags.add(tag));
+    }
   }
 
   const declared = new Map((spec.tags || []).map((tag) => [tag.name, tag]));
-  grouped.tags = [NEXT_GEN_SECTION, LEGACY_SECTION].flatMap((section) => {
-    const used = tagsBySection[section];
-    const ordered = [...declared.keys()].filter((name) => used.has(name));
-    const undeclared = [...used].filter((name) => !declared.has(name));
-    return [...ordered, ...undeclared].map((name) => ({
-      ...declared.get(name),
-      name: `${section} · ${name}`,
-    }));
-  });
+  const inDeclaredOrder = (used) => [
+    ...[...declared.keys()].filter((name) => used.has(name)),
+    ...[...used].filter((name) => !declared.has(name)),
+  ];
+  grouped.tags = [
+    ...inDeclaredOrder(currentTags).map((name) => ({ ...declared.get(name), name })),
+    ...inDeclaredOrder(legacyTags).map((name) => ({ ...declared.get(name), name: legacyTag(name) })),
+  ];
 
   grouped.info = {
     ...grouped.info,

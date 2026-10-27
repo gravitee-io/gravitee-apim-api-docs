@@ -33,31 +33,31 @@ describe("groupOperationsByPortal", () => {
     expect(groupOperationsByPortal(spec)).toBe(spec);
   });
 
-  it("puts next-gen and shared operations in Next Gen sections", () => {
+  it("keeps the tags of next-gen and shared operations", () => {
     const grouped = groupOperationsByPortal(aSpec());
-    expect(grouped.paths["/apis/_search"].post.tags).toEqual(["Next Gen · Api"]);
-    expect(grouped.paths["/applications"].get.tags).toEqual(["Next Gen · Application"]);
+    expect(grouped.paths["/apis/_search"].post.tags).toEqual(["Api"]);
+    expect(grouped.paths["/applications"].get.tags).toEqual(["Application"]);
   });
 
   it("puts classic operations in Legacy sections", () => {
     const grouped = groupOperationsByPortal(aSpec());
-    expect(grouped.paths["/apis"].get.tags).toEqual(["Legacy (Classic) · Api"]);
-    expect(grouped.paths["/applications"].post.tags).toEqual(["Legacy (Classic) · Application"]);
+    expect(grouped.paths["/apis"].get.tags).toEqual(["Legacy · Api"]);
+    expect(grouped.paths["/applications"].post.tags).toEqual(["Legacy · Application"]);
   });
 
-  it("lists the Next Gen sections before the Legacy ones, keeping tag order and descriptions", () => {
+  it("lists the Legacy sections after the other ones, keeping tag order and descriptions", () => {
     const grouped = groupOperationsByPortal(aSpec());
     expect(grouped.tags).toEqual([
-      { name: "Next Gen · Api", description: "All about APIs" },
-      { name: "Next Gen · Application", description: "All about applications" },
-      { name: "Legacy (Classic) · Api", description: "All about APIs" },
-      { name: "Legacy (Classic) · Application", description: "All about applications" },
+      { name: "Api", description: "All about APIs" },
+      { name: "Application", description: "All about applications" },
+      { name: "Legacy · Api", description: "All about APIs" },
+      { name: "Legacy · Application", description: "All about applications" },
     ]);
   });
 
-  it("tells custom portal builders to use the Next Gen operations", () => {
+  it("tells custom portal builders to avoid the Legacy operations", () => {
     const grouped = groupOperationsByPortal(aSpec());
-    expect(grouped.info.description).toMatch(/^> .*Next Gen/);
+    expect(grouped.info.description).toMatch(/^> .*Legacy/);
     expect(grouped.info.description).toContain("API dedicated to the devportal.");
   });
 

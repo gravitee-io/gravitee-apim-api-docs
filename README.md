@@ -38,7 +38,7 @@ The jars belong to APIM's core reactor, which releases apart from the product fr
 ## APIs included
 
 - Automation (`open-api.yaml`)
-- Portal (`portal-openapi.yaml`) — from 4.14, the page groups its operations into Next Gen and Legacy (Classic) sections, from the `x-gravitee-portal` extension of each operation
+- Portal (`portal-openapi.yaml`) — from 4.14, the page moves the operations only the classic portal calls into Legacy sections, listed last, from the `x-gravitee-portal` extension of each operation
 - Management v1 (`console-openapi.yaml`, generated at APIM build time)
 - Management v2 — one entry per domain (`openapi-apis.yaml`, `openapi-plugins.yaml`, …)
 
