@@ -325,3 +325,61 @@ describe("onApiChange", () => {
     expect(window.location.search).toMatch(/api=portal/);
   });
 });
+
+describe("renderApi: Portal API sections", () => {
+  const portalSpec = {
+    openapi: "3.0.0",
+    info: { title: "Portal", description: "Portal API." },
+    tags: [{ name: "Api" }],
+    paths: {
+      "/apis": { get: { tags: ["Api"], "x-gravitee-portal": "classic" } },
+    },
+  };
+
+  const stubFetch = (specResponse) =>
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url) =>
+        url === "specs/versions.json"
+          ? { ok: true, status: 200, json: async () => fakeManifest }
+          : specResponse(),
+      ),
+    );
+
+  const renderedApi = () => document.querySelector("elements-api");
+
+  beforeEach(() => {
+    // YAML is a superset of JSON, so JSON.parse stands in for js-yaml.
+    vi.stubGlobal("jsyaml", { load: (text) => JSON.parse(text) });
+  });
+
+  it("hands Elements the Portal spec grouped into Next Gen and Legacy sections", async () => {
+    stubFetch(() => ({ ok: true, status: 200, text: async () => JSON.stringify(portalSpec) }));
+    history.replaceState(null, "", "?api=portal");
+    await createApp().init();
+
+    await vi.waitFor(() => expect(renderedApi()).not.toBeNull());
+    const document = JSON.parse(renderedApi().getAttribute("apiDescriptionDocument"));
+    expect(document.paths["/apis"].get.tags).toEqual(["Legacy (Classic) · Api"]);
+    expect(renderedApi().hasAttribute("apiDescriptionUrl")).toBe(false);
+  });
+
+  it("falls back to the spec URL when the Portal spec cannot be loaded", async () => {
+    stubFetch(() => ({ ok: false, status: 500 }));
+    history.replaceState(null, "", "?api=portal");
+    await createApp().init();
+
+    await vi.waitFor(() => expect(renderedApi()).not.toBeNull());
+    expect(renderedApi().getAttribute("apiDescriptionUrl")).toBe("specs/4.11.5/portal.yaml");
+  });
+
+  it("keeps passing the spec URL for the other APIs", async () => {
+    stubFetch(() => {
+      throw new Error("only the manifest should be fetched");
+    });
+    history.replaceState(null, "", "?api=automation");
+    await createApp().init();
+
+    expect(renderedApi().getAttribute("apiDescriptionUrl")).toBe("specs/4.11.5/automation.yaml");
+  });
+});

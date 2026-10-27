@@ -103,6 +103,59 @@ export const migrateLegacyHash = () => {
   return true;
 };
 
+// ---------- Portal API sections ----------
+//
+// From 4.14, every Portal API operation declares which developer portal
+// calls it (`x-gravitee-portal`: classic, next or both). Elements builds its
+// sidebar from the tags, so we prefix them with a section: custom portals
+// must find the Next Gen operations first, the Legacy ones last.
+
+const PORTAL_EXTENSION = "x-gravitee-portal";
+const NEXT_GEN_SECTION = "Next Gen";
+const LEGACY_SECTION = "Legacy (Classic)";
+const HTTP_METHODS = ["get", "put", "post", "delete", "options", "head", "patch", "trace"];
+const PORTAL_SECTIONS_INTRO =
+  `> **Building your own developer portal?** Use the **${NEXT_GEN_SECTION}** operations. ` +
+  `The **${LEGACY_SECTION}** operations only serve the classic developer portal.`;
+
+const operationsOf = (spec) =>
+  Object.values(spec.paths || {}).flatMap((item) =>
+    HTTP_METHODS.filter((method) => item[method]).map((method) => item[method]),
+  );
+
+export const groupOperationsByPortal = (spec) => {
+  if (!operationsOf(spec).some((op) => op[PORTAL_EXTENSION])) return spec;
+
+  const grouped = structuredClone(spec);
+  const tagsBySection = { [NEXT_GEN_SECTION]: new Set(), [LEGACY_SECTION]: new Set() };
+  for (const op of operationsOf(grouped)) {
+    const section = op[PORTAL_EXTENSION] === "classic" ? LEGACY_SECTION : NEXT_GEN_SECTION;
+    op.tags = (op.tags || []).map((tag) => {
+      tagsBySection[section].add(tag);
+      return `${section} · ${tag}`;
+    });
+  }
+
+  const declared = new Map((spec.tags || []).map((tag) => [tag.name, tag]));
+  grouped.tags = [NEXT_GEN_SECTION, LEGACY_SECTION].flatMap((section) => {
+    const used = tagsBySection[section];
+    const ordered = [...declared.keys()].filter((name) => used.has(name));
+    const undeclared = [...used].filter((name) => !declared.has(name));
+    return [...ordered, ...undeclared].map((name) => ({
+      ...declared.get(name),
+      name: `${section} · ${name}`,
+    }));
+  });
+
+  grouped.info = {
+    ...grouped.info,
+    description: [PORTAL_SECTIONS_INTRO, grouped.info?.description]
+      .filter(Boolean)
+      .join("\n\n"),
+  };
+  return grouped;
+};
+
 // ---------- application factory ----------
 //
 // Returns a fresh runtime instance with its own state. app.js calls this
@@ -114,6 +167,9 @@ export const createApp = () => {
   // The manifest version object currently being displayed (full, e.g.
   // "4.11.5"). Read by onApiChange to re-render without re-resolving.
   let currentVersion = null;
+  // Bumped on every render, so a spec that loads after the user moved on
+  // does not replace the newer page.
+  let renderCount = 0;
 
   const versionSelect = document.getElementById("version-select");
   const apiSelect = document.getElementById("api-select");
@@ -207,17 +263,43 @@ export const createApp = () => {
     }
 
     const specUrl = "specs/" + api.spec;
-    container.innerHTML = "";
-    const el = document.createElement("elements-api");
-    el.setAttribute("apiDescriptionUrl", specUrl);
-    el.setAttribute("router", "hash");
-    el.setAttribute("layout", "sidebar");
-    el.setAttribute("hideSchemas", "false");
-    el.setAttribute("hideInternal", "true");
-    el.setAttribute("tryItCredentialsPolicy", "omit");
-    container.appendChild(el);
+    const render = ++renderCount;
+    const mount = (setDescription) => {
+      if (render !== renderCount) return;
+      container.innerHTML = "";
+      const el = document.createElement("elements-api");
+      setDescription(el);
+      el.setAttribute("router", "hash");
+      el.setAttribute("layout", "sidebar");
+      el.setAttribute("hideSchemas", "false");
+      el.setAttribute("hideInternal", "true");
+      el.setAttribute("tryItCredentialsPolicy", "omit");
+      container.appendChild(el);
+    };
+    const mountFromUrl = () =>
+      mount((el) => el.setAttribute("apiDescriptionUrl", specUrl));
+
+    if (api.id === "portal") {
+      loadPortalSpec(specUrl)
+        .then((spec) =>
+          mount((el) =>
+            el.setAttribute("apiDescriptionDocument", JSON.stringify(spec)),
+          ),
+        )
+        .catch(mountFromUrl);
+    } else {
+      mountFromUrl();
+    }
 
     if (apiSelect.value !== api.id) apiSelect.value = api.id;
+  };
+
+  // The Portal spec is parsed here rather than by Elements, to regroup its
+  // operations first. Any failure falls back to letting Elements load the URL.
+  const loadPortalSpec = async (specUrl) => {
+    const res = await fetch(specUrl);
+    if (!res.ok) throw new Error(`HTTP ${res.status} on ${specUrl}`);
+    return groupOperationsByPortal(globalThis.jsyaml.load(await res.text()));
   };
 
   // Picking a different version always writes the minor in `?v`, since
