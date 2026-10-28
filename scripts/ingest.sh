@@ -135,7 +135,7 @@ find "$DEST/management-v2" -name "openapi-*-deprecated.yaml" -delete
 # This is the single source of truth read by the front-end (assets/app.js).
 # Format:
 #   { "latest": "<x.y.z>",
-#     "versions": [ { "version", "ingestedAt", "apis": [ {id,label,spec,group?} ] } ] }
+#     "versions": [ { "version", "ingestedAt", "apis": [ {id,label,spec,group?,portal?} ] } ] }
 #
 # We embed a Python here-document because:
 #   - it's easier to read than a tower of jq/sed,
@@ -174,9 +174,23 @@ fixed = [
     ('portal.yaml',     'Portal',     'portal'),
     ('management.yaml', 'Management (v1)', 'management'),
 ]
+# From 4.14, each Portal API operation declares the developer portal that
+# calls it (x-gravitee-portal). Such a spec gets one entry per portal, which
+# the front-end filters; a plain text search is enough to detect it.
+portal_entries = [
+    ('portal-next',    'Next Gen Portal', 'next'),
+    ('portal-classic', 'Classic Portal',  'classic'),
+]
 for fname, label, aid in fixed:
-    if os.path.exists(os.path.join(dest, fname)):
-        apis.append({'id': aid, 'label': label, 'spec': f'{version}/{fname}'})
+    path = os.path.join(dest, fname)
+    if not os.path.exists(path):
+        continue
+    spec = f'{version}/{fname}'
+    if aid == 'portal' and 'x-gravitee-portal:' in open(path).read():
+        for pid, plabel, portal in portal_entries:
+            apis.append({'id': pid, 'label': plabel, 'spec': spec, 'portal': portal})
+    else:
+        apis.append({'id': aid, 'label': label, 'spec': spec})
 
 # management-v2: discover whatever yaml files were extracted (the set evolves
 # between APIM versions, so we don't hardcode it).

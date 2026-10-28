@@ -326,13 +326,36 @@ describe("onApiChange", () => {
   });
 });
 
-describe("renderApi: Portal API sections", () => {
+describe("Portal API split into one entry per portal", () => {
+  // From 4.14 the manifest lists the Portal API once per portal, both
+  // entries pointing to the same spec.
+  const splitManifest = {
+    latest: "4.14.0",
+    versions: [
+      {
+        version: "4.14.0",
+        apis: [
+          { id: "automation", label: "Automation", spec: "4.14.0/automation.yaml" },
+          { id: "portal-next", label: "Next Gen Portal", spec: "4.14.0/portal.yaml", portal: "next" },
+          { id: "portal-classic", label: "Classic Portal", spec: "4.14.0/portal.yaml", portal: "classic" },
+        ],
+      },
+      {
+        version: "4.13.2",
+        apis: [
+          { id: "automation", label: "Automation", spec: "4.13.2/automation.yaml" },
+          { id: "portal", label: "Portal", spec: "4.13.2/portal.yaml" },
+        ],
+      },
+    ],
+  };
+
   const portalSpec = {
     openapi: "3.0.0",
-    info: { title: "Portal", description: "Portal API." },
-    tags: [{ name: "Api" }],
+    info: { title: "Portal" },
     paths: {
-      "/apis": { get: { tags: ["Api"], "x-gravitee-portal": "classic" } },
+      "/apis": { get: { operationId: "getApis", "x-gravitee-portal": "classic" } },
+      "/apis/_search": { post: { operationId: "searchApis", "x-gravitee-portal": "both" } },
     },
   };
 
@@ -341,36 +364,72 @@ describe("renderApi: Portal API sections", () => {
       "fetch",
       vi.fn(async (url) =>
         url === "specs/versions.json"
-          ? { ok: true, status: 200, json: async () => fakeManifest }
+          ? { ok: true, status: 200, json: async () => splitManifest }
           : specResponse(),
       ),
     );
+  const specFound = () => ({ ok: true, status: 200, text: async () => JSON.stringify(portalSpec) });
 
   const renderedApi = () => document.querySelector("elements-api");
+  const renderedOperationIds = async () => {
+    await vi.waitFor(() => expect(renderedApi()?.hasAttribute("apiDescriptionDocument")).toBe(true));
+    const spec = JSON.parse(renderedApi().getAttribute("apiDescriptionDocument"));
+    return Object.values(spec.paths).flatMap((item) => Object.values(item).map((op) => op.operationId));
+  };
 
   beforeEach(() => {
     // YAML is a superset of JSON, so JSON.parse stands in for js-yaml.
     vi.stubGlobal("jsyaml", { load: (text) => JSON.parse(text) });
   });
 
-  it("hands Elements the Portal spec with its classic operations in Legacy sections", async () => {
-    stubFetch(() => ({ ok: true, status: 200, text: async () => JSON.stringify(portalSpec) }));
-    history.replaceState(null, "", "?api=portal");
-    await createApp().init();
+  it("shows only the operations of the selected portal", async () => {
+    stubFetch(specFound);
+    history.replaceState(null, "", "?api=portal-classic");
+    const app = createApp();
+    await app.init();
+    expect(await renderedOperationIds()).toEqual(["getApis", "searchApis"]);
 
-    await vi.waitFor(() => expect(renderedApi()).not.toBeNull());
-    const document = JSON.parse(renderedApi().getAttribute("apiDescriptionDocument"));
-    expect(document.paths["/apis"].get.tags).toEqual(["Legacy · Api"]);
-    expect(renderedApi().hasAttribute("apiDescriptionUrl")).toBe(false);
+    apiSelect().value = "portal-next";
+    app.onApiChange();
+    await vi.waitFor(async () => expect(await renderedOperationIds()).toEqual(["searchApis"]));
+  });
+
+  it("opens the Next Gen Portal from a former portal link", async () => {
+    stubFetch(specFound);
+    history.replaceState(null, "", "?v=4.14&api=portal");
+    await createApp().init();
+    expect(apiSelect().value).toBe("portal-next");
+    expect(window.location.search).toMatch(/api=portal-next/);
+  });
+
+  it("opens the Classic Portal from a link to a classic operation", async () => {
+    stubFetch(specFound);
+    history.replaceState(null, "", "?v=4.14&api=portal#/operations/getApis");
+    await createApp().init();
+    expect(await renderedOperationIds()).toEqual(["getApis", "searchApis"]);
+    expect(apiSelect().value).toBe("portal-classic");
+    expect(window.location.search).toMatch(/api=portal-classic/);
+    expect(window.location.hash).toBe("#/operations/getApis");
+  });
+
+  it("keeps the Portal API selected when changing to a version that is not split", async () => {
+    stubFetch(specFound);
+    history.replaceState(null, "", "?v=4.14&api=portal-classic");
+    const app = createApp();
+    await app.init();
+
+    versionSelect().value = "4.13";
+    app.onVersionChange();
+    expect(apiSelect().value).toBe("portal");
   });
 
   it("falls back to the spec URL when the Portal spec cannot be loaded", async () => {
     stubFetch(() => ({ ok: false, status: 500 }));
-    history.replaceState(null, "", "?api=portal");
+    history.replaceState(null, "", "?api=portal-next");
     await createApp().init();
 
     await vi.waitFor(() => expect(renderedApi()).not.toBeNull());
-    expect(renderedApi().getAttribute("apiDescriptionUrl")).toBe("specs/4.11.5/portal.yaml");
+    expect(renderedApi().getAttribute("apiDescriptionUrl")).toBe("specs/4.14.0/portal.yaml");
   });
 
   it("keeps passing the spec URL for the other APIs", async () => {
@@ -380,6 +439,6 @@ describe("renderApi: Portal API sections", () => {
     history.replaceState(null, "", "?api=automation");
     await createApp().init();
 
-    expect(renderedApi().getAttribute("apiDescriptionUrl")).toBe("specs/4.11.5/automation.yaml");
+    expect(renderedApi().getAttribute("apiDescriptionUrl")).toBe("specs/4.14.0/automation.yaml");
   });
 });

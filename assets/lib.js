@@ -103,60 +103,54 @@ export const migrateLegacyHash = () => {
   return true;
 };
 
-// ---------- Portal API sections ----------
+// ---------- Portal API views ----------
 //
 // From 4.14, every Portal API operation declares which developer portal
-// calls it (`x-gravitee-portal`: classic, next or both). Elements builds its
-// sidebar from the tags, so the classic-only operations move to "Legacy"
-// sections listed last: custom portals must not build on them.
+// calls it (`x-gravitee-portal`: classic, next or both). The manifest then
+// lists the Portal API once per portal (`portal: "next"` or "classic"), both
+// entries pointing to the same spec, and the page keeps the operations of
+// the selected portal.
 
 const PORTAL_EXTENSION = "x-gravitee-portal";
-const LEGACY = "Legacy";
 const HTTP_METHODS = ["get", "put", "post", "delete", "options", "head", "patch", "trace"];
-const PORTAL_SECTIONS_INTRO =
-  `> **Building your own developer portal?** The operations in the **${LEGACY}** sections ` +
-  `only serve the classic developer portal. Build on the other operations.`;
 
-const operationsOf = (spec) =>
-  Object.values(spec.paths || {}).flatMap((item) =>
-    HTTP_METHODS.filter((method) => item[method]).map((method) => item[method]),
-  );
+export const filterOperationsByPortal = (spec, portal) => {
+  const filtered = structuredClone(spec);
+  const usedTags = new Set();
+  for (const [path, item] of Object.entries(filtered.paths || {})) {
+    for (const method of HTTP_METHODS) {
+      const op = item[method];
+      if (!op) continue;
+      if (op[PORTAL_EXTENSION] === portal || op[PORTAL_EXTENSION] === "both") {
+        (op.tags || []).forEach((tag) => usedTags.add(tag));
+      } else {
+        delete item[method];
+      }
+    }
+    if (!HTTP_METHODS.some((method) => item[method])) delete filtered.paths[path];
+  }
+  if (filtered.tags) filtered.tags = filtered.tags.filter((tag) => usedTags.has(tag.name));
+  return filtered;
+};
 
-const legacyTag = (tag) => `${LEGACY} · ${tag}`;
-
-export const groupOperationsByPortal = (spec) => {
-  if (!operationsOf(spec).some((op) => op[PORTAL_EXTENSION])) return spec;
-
-  const grouped = structuredClone(spec);
-  const currentTags = new Set();
-  const legacyTags = new Set();
-  for (const op of operationsOf(grouped)) {
-    const tags = op.tags || [];
-    if (op[PORTAL_EXTENSION] === "classic") {
-      tags.forEach((tag) => legacyTags.add(tag));
-      op.tags = tags.map(legacyTag);
-    } else {
-      tags.forEach((tag) => currentTags.add(tag));
+const portalOfOperation = (spec, operationId) => {
+  for (const item of Object.values(spec.paths || {})) {
+    for (const method of HTTP_METHODS) {
+      if (item[method]?.operationId === operationId) return item[method][PORTAL_EXTENSION];
     }
   }
+  return undefined;
+};
 
-  const declared = new Map((spec.tags || []).map((tag) => [tag.name, tag]));
-  const inDeclaredOrder = (used) => [
-    ...[...declared.keys()].filter((name) => used.has(name)),
-    ...[...used].filter((name) => !declared.has(name)),
-  ];
-  grouped.tags = [
-    ...inDeclaredOrder(currentTags).map((name) => ({ ...declared.get(name), name })),
-    ...inDeclaredOrder(legacyTags).map((name) => ({ ...declared.get(name), name: legacyTag(name) })),
-  ];
-
-  grouped.info = {
-    ...grouped.info,
-    description: [PORTAL_SECTIONS_INTRO, grouped.info?.description]
-      .filter(Boolean)
-      .join("\n\n"),
-  };
-  return grouped;
+// Links written before the split say `api=portal`: they open the Next Gen
+// Portal. A per-portal id on a version that is not split opens its Portal.
+export const findApi = (versionObj, apiId) => {
+  const exact = versionObj.apis.find((api) => api.id === apiId);
+  if (exact || !apiId?.startsWith("portal")) return exact;
+  return (
+    versionObj.apis.find((api) => api.portal === "next") ||
+    versionObj.apis.find((api) => api.id === "portal")
+  );
 };
 
 // ---------- application factory ----------
@@ -258,8 +252,7 @@ export const createApp = () => {
       setPlaceholder("Unknown version.", true);
       return;
     }
-    const api =
-      versionObj.apis.find((a) => a.id === apiId) || versionObj.apis[0];
+    const api = findApi(versionObj, apiId) || versionObj.apis[0];
     if (!api) {
       setPlaceholder("No API available for this version.", true);
       return;
@@ -282,13 +275,19 @@ export const createApp = () => {
     const mountFromUrl = () =>
       mount((el) => el.setAttribute("apiDescriptionUrl", specUrl));
 
-    if (api.id === "portal") {
-      loadPortalSpec(specUrl)
-        .then((spec) =>
+    if (api.portal) {
+      loadSpec(specUrl)
+        .then((spec) => {
+          const shown = portalViewOf(versionObj, api, spec);
+          if (shown !== api && render === renderCount) {
+            apiSelect.value = shown.id;
+            setSearch(parseSearch().v, shown.id);
+          }
+          const filtered = filterOperationsByPortal(spec, shown.portal);
           mount((el) =>
-            el.setAttribute("apiDescriptionDocument", JSON.stringify(spec)),
-          ),
-        )
+            el.setAttribute("apiDescriptionDocument", JSON.stringify(filtered)),
+          );
+        })
         .catch(mountFromUrl);
     } else {
       mountFromUrl();
@@ -297,12 +296,22 @@ export const createApp = () => {
     if (apiSelect.value !== api.id) apiSelect.value = api.id;
   };
 
-  // The Portal spec is parsed here rather than by Elements, to regroup its
-  // operations first. Any failure falls back to letting Elements load the URL.
-  const loadPortalSpec = async (specUrl) => {
+  // A per-portal spec is parsed here rather than by Elements, to filter its
+  // operations first. Any failure falls back to letting Elements load the
+  // whole spec from its URL.
+  const loadSpec = async (specUrl) => {
     const res = await fetch(specUrl);
     if (!res.ok) throw new Error(`HTTP ${res.status} on ${specUrl}`);
-    return groupOperationsByPortal(globalThis.jsyaml.load(await res.text()));
+    return globalThis.jsyaml.load(await res.text());
+  };
+
+  // A deep link to an operation of the other portal opens that portal, so
+  // links written before the split keep landing on their operation.
+  const portalViewOf = (versionObj, api, spec) => {
+    const operationId = window.location.hash.match(/^#\/operations\/([^/?]+)/)?.[1];
+    const portal = operationId && portalOfOperation(spec, operationId);
+    if (!portal || portal === "both" || portal === api.portal) return api;
+    return versionObj.apis.find((other) => other.portal === portal) || api;
   };
 
   // Picking a different version always writes the minor in `?v`, since
@@ -318,7 +327,7 @@ export const createApp = () => {
     const previousApiId = apiSelect.value;
     populateApis(newVersion);
     const apiId =
-      newVersion.apis.find((a) => a.id === previousApiId)?.id ||
+      findApi(newVersion, previousApiId)?.id ||
       apiSelect.options[0]?.value;
     if (apiId) apiSelect.value = apiId;
 
@@ -414,7 +423,7 @@ export const createApp = () => {
     populateApis(versionObj);
 
     const apiId =
-      (search.api && versionObj.apis.find((a) => a.id === search.api)?.id) ||
+      (search.api && findApi(versionObj, search.api)?.id) ||
       apiSelect.options[0]?.value;
     if (apiId) apiSelect.value = apiId;
 
