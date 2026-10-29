@@ -247,7 +247,7 @@ export const createApp = () => {
     }
   };
 
-  const renderApi = (versionObj, apiId) => {
+  const renderApi = (versionObj, apiId, followDeepLink = false) => {
     if (!versionObj) {
       setPlaceholder("Unknown version.", true);
       return;
@@ -278,7 +278,7 @@ export const createApp = () => {
     if (api.portal) {
       loadSpec(specUrl)
         .then((spec) => {
-          const shown = portalViewOf(versionObj, api, spec);
+          const shown = followDeepLink ? portalViewOf(versionObj, api, spec) : api;
           if (shown !== api && render === renderCount) {
             apiSelect.value = shown.id;
             setSearch(parseSearch().v, shown.id);
@@ -305,8 +305,9 @@ export const createApp = () => {
     return globalThis.jsyaml.load(await res.text());
   };
 
-  // A deep link to an operation of the other portal opens that portal, so
-  // links written before the split keep landing on their operation.
+  // On page load, a deep link to an operation of the other portal opens that
+  // portal, so links written before the split keep landing on their
+  // operation. Later renders follow the user's pick instead.
   const portalViewOf = (versionObj, api, spec) => {
     const operationId = window.location.hash.match(/^#\/operations\/([^/?]+)/)?.[1];
     const portal = operationId && portalOfOperation(spec, operationId);
@@ -427,7 +428,7 @@ export const createApp = () => {
       apiSelect.options[0]?.value;
     if (apiId) apiSelect.value = apiId;
 
-    renderApi(versionObj, apiId);
+    renderApi(versionObj, apiId, true);
     setSearch(vForUrl, apiId);
 
     versionSelect.addEventListener("change", onVersionChange);

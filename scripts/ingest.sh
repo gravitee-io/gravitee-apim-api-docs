@@ -176,7 +176,8 @@ fixed = [
 ]
 # From 4.14, each Portal API operation declares the developer portal that
 # calls it (x-gravitee-portal). Such a spec gets one entry per portal, which
-# the front-end filters; a plain text search is enough to detect it.
+# the front-end filters. The key is matched as an indented YAML key, so a
+# description that merely mentions it does not count.
 portal_entries = [
     ('portal-next',    'Next Gen Portal', 'next'),
     ('portal-classic', 'Classic Portal',  'classic'),
@@ -186,7 +187,7 @@ for fname, label, aid in fixed:
     if not os.path.exists(path):
         continue
     spec = f'{version}/{fname}'
-    if aid == 'portal' and 'x-gravitee-portal:' in open(path).read():
+    if aid == 'portal' and re.search(r'^\s+x-gravitee-portal:', open(path).read(), re.M):
         for pid, plabel, portal in portal_entries:
             apis.append({'id': pid, 'label': plabel, 'spec': spec, 'portal': portal})
     else:

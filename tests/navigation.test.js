@@ -412,6 +412,36 @@ describe("Portal API split into one entry per portal", () => {
     expect(window.location.hash).toBe("#/operations/getApis");
   });
 
+  it("keeps the portal the user picks, even when the URL points to an operation of the other one", async () => {
+    stubFetch(specFound);
+    history.replaceState(null, "", "?v=4.14&api=portal-classic#/operations/getApis");
+    const app = createApp();
+    await app.init();
+    expect(await renderedOperationIds()).toEqual(["getApis", "searchApis"]);
+
+    apiSelect().value = "portal-next";
+    app.onApiChange();
+    await vi.waitFor(async () => expect(await renderedOperationIds()).toEqual(["searchApis"]));
+    expect(apiSelect().value).toBe("portal-next");
+    expect(window.location.search).toMatch(/api=portal-next/);
+  });
+
+  it("ignores a Portal spec that loads after the user picked another API", async () => {
+    let releaseSpec;
+    stubFetch(() => new Promise((resolve) => (releaseSpec = () => resolve(specFound()))));
+    history.replaceState(null, "", "?v=4.14&api=portal-classic");
+    const app = createApp();
+    await app.init();
+
+    apiSelect().value = "automation";
+    app.onApiChange();
+    releaseSpec();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(renderedApi().getAttribute("apiDescriptionUrl")).toBe("specs/4.14.0/automation.yaml");
+    expect(renderedApi().hasAttribute("apiDescriptionDocument")).toBe(false);
+  });
+
   it("keeps the Portal API selected when changing to a version that is not split", async () => {
     stubFetch(specFound);
     history.replaceState(null, "", "?v=4.14&api=portal-classic");
