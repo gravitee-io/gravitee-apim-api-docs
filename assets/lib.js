@@ -103,6 +103,56 @@ export const migrateLegacyHash = () => {
   return true;
 };
 
+// ---------- Portal API views ----------
+//
+// From 4.14, every Portal API operation declares which developer portal
+// calls it (`x-gravitee-portal`: classic, next or both). The manifest then
+// lists the Portal API once per portal (`portal: "next"` or "classic"), both
+// entries pointing to the same spec, and the page keeps the operations of
+// the selected portal.
+
+const PORTAL_EXTENSION = "x-gravitee-portal";
+const HTTP_METHODS = ["get", "put", "post", "delete", "options", "head", "patch", "trace"];
+
+export const filterOperationsByPortal = (spec, portal) => {
+  const filtered = structuredClone(spec);
+  const usedTags = new Set();
+  for (const [path, item] of Object.entries(filtered.paths || {})) {
+    for (const method of HTTP_METHODS) {
+      const op = item[method];
+      if (!op) continue;
+      if (op[PORTAL_EXTENSION] === portal || op[PORTAL_EXTENSION] === "both") {
+        (op.tags || []).forEach((tag) => usedTags.add(tag));
+      } else {
+        delete item[method];
+      }
+    }
+    if (!HTTP_METHODS.some((method) => item[method])) delete filtered.paths[path];
+  }
+  if (filtered.tags) filtered.tags = filtered.tags.filter((tag) => usedTags.has(tag.name));
+  return filtered;
+};
+
+const portalOfOperation = (spec, operationId) => {
+  for (const item of Object.values(spec.paths || {})) {
+    for (const method of HTTP_METHODS) {
+      if (item[method]?.operationId === operationId) return item[method][PORTAL_EXTENSION];
+    }
+  }
+  return undefined;
+};
+
+// Links written before the split say `api=portal`: they open the Next Gen
+// Portal. A per-portal id on a version that is not split opens its Portal.
+export const findApi = (versionObj, apiId) => {
+  const exact = versionObj.apis.find((api) => api.id === apiId);
+  if (exact || !apiId?.startsWith("portal")) return exact;
+  return (
+    versionObj.apis.find((api) => api.portal === "next") ||
+    versionObj.apis.find((api) => api.id === "portal")
+  );
+};
+
 // ---------- application factory ----------
 //
 // Returns a fresh runtime instance with its own state. app.js calls this
@@ -114,6 +164,9 @@ export const createApp = () => {
   // The manifest version object currently being displayed (full, e.g.
   // "4.11.5"). Read by onApiChange to re-render without re-resolving.
   let currentVersion = null;
+  // Bumped on every render, so a spec that loads after the user moved on
+  // does not replace the newer page.
+  let renderCount = 0;
 
   const versionSelect = document.getElementById("version-select");
   const apiSelect = document.getElementById("api-select");
@@ -194,30 +247,76 @@ export const createApp = () => {
     }
   };
 
-  const renderApi = (versionObj, apiId) => {
+  const renderApi = (versionObj, apiId, followDeepLink = false) => {
     if (!versionObj) {
       setPlaceholder("Unknown version.", true);
       return;
     }
-    const api =
-      versionObj.apis.find((a) => a.id === apiId) || versionObj.apis[0];
+    const api = findApi(versionObj, apiId) || versionObj.apis[0];
     if (!api) {
       setPlaceholder("No API available for this version.", true);
       return;
     }
 
     const specUrl = "specs/" + api.spec;
-    container.innerHTML = "";
-    const el = document.createElement("elements-api");
-    el.setAttribute("apiDescriptionUrl", specUrl);
-    el.setAttribute("router", "hash");
-    el.setAttribute("layout", "sidebar");
-    el.setAttribute("hideSchemas", "false");
-    el.setAttribute("hideInternal", "true");
-    el.setAttribute("tryItCredentialsPolicy", "omit");
-    container.appendChild(el);
+    const render = ++renderCount;
+    const mount = (setDescription) => {
+      if (render !== renderCount) return;
+      container.innerHTML = "";
+      const el = document.createElement("elements-api");
+      setDescription(el);
+      el.setAttribute("router", "hash");
+      el.setAttribute("layout", "sidebar");
+      el.setAttribute("hideSchemas", "false");
+      el.setAttribute("hideInternal", "true");
+      el.setAttribute("tryItCredentialsPolicy", "omit");
+      container.appendChild(el);
+    };
+    const mountFromUrl = () =>
+      mount((el) => el.setAttribute("apiDescriptionUrl", specUrl));
+
+    if (api.portal) {
+      loadSpec(specUrl)
+        .then((spec) => {
+          const shown = followDeepLink ? portalViewOf(versionObj, api, spec) : api;
+          if (shown !== api && render === renderCount) {
+            apiSelect.value = shown.id;
+            setSearch(parseSearch().v, shown.id);
+          }
+          const filtered = filterOperationsByPortal(spec, shown.portal);
+          mount((el) =>
+            el.setAttribute("apiDescriptionDocument", JSON.stringify(filtered)),
+          );
+        })
+        .catch((error) => {
+          console.warn(`Showing every Portal API operation: could not filter ${specUrl} by portal.`, error);
+          mountFromUrl();
+        });
+    } else {
+      mountFromUrl();
+    }
 
     if (apiSelect.value !== api.id) apiSelect.value = api.id;
+  };
+
+  // A per-portal spec is parsed here rather than by Elements, to filter its
+  // operations first. Any failure falls back to letting Elements load the
+  // whole spec from its URL.
+  const loadSpec = async (specUrl) => {
+    const res = await fetch(specUrl);
+    if (!res.ok) throw new Error(`HTTP ${res.status} on ${specUrl}`);
+    return globalThis.jsyaml.load(await res.text());
+  };
+
+  // On page load, or on a version change that turned the Portal API into its
+  // per-portal entries, a deep link to an operation of the other portal opens
+  // that portal, so links written before the split keep landing on their
+  // operation. Renders that follow the user's pick of a portal keep it.
+  const portalViewOf = (versionObj, api, spec) => {
+    const operationId = window.location.hash.match(/^#\/operations\/([^/?]+)/)?.[1];
+    const portal = operationId && portalOfOperation(spec, operationId);
+    if (!portal || portal === "both" || portal === api.portal) return api;
+    return versionObj.apis.find((other) => other.portal === portal) || api;
   };
 
   // Picking a different version always writes the minor in `?v`, since
@@ -233,11 +332,11 @@ export const createApp = () => {
     const previousApiId = apiSelect.value;
     populateApis(newVersion);
     const apiId =
-      newVersion.apis.find((a) => a.id === previousApiId)?.id ||
+      findApi(newVersion, previousApiId)?.id ||
       apiSelect.options[0]?.value;
     if (apiId) apiSelect.value = apiId;
 
-    renderApi(newVersion, apiId);
+    renderApi(newVersion, apiId, apiId !== previousApiId);
     setSearch(minor, apiId);
   };
 
@@ -329,11 +428,11 @@ export const createApp = () => {
     populateApis(versionObj);
 
     const apiId =
-      (search.api && versionObj.apis.find((a) => a.id === search.api)?.id) ||
+      (search.api && findApi(versionObj, search.api)?.id) ||
       apiSelect.options[0]?.value;
     if (apiId) apiSelect.value = apiId;
 
-    renderApi(versionObj, apiId);
+    renderApi(versionObj, apiId, true);
     setSearch(vForUrl, apiId);
 
     versionSelect.addEventListener("change", onVersionChange);
