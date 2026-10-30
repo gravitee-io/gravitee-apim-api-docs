@@ -429,7 +429,7 @@ describe("Portal API split into one entry per portal", () => {
   it("ignores a Portal spec that loads after the user picked another API", async () => {
     let releaseSpec;
     stubFetch(() => new Promise((resolve) => (releaseSpec = () => resolve(specFound()))));
-    history.replaceState(null, "", "?v=4.14&api=portal-classic");
+    history.replaceState(null, "", "?v=4.14&api=portal-next#/operations/getApis");
     const app = createApp();
     await app.init();
 
@@ -440,6 +440,8 @@ describe("Portal API split into one entry per portal", () => {
 
     expect(renderedApi().getAttribute("apiDescriptionUrl")).toBe("specs/4.14.0/automation.yaml");
     expect(renderedApi().hasAttribute("apiDescriptionDocument")).toBe(false);
+    expect(apiSelect().value).toBe("automation");
+    expect(window.location.search).toMatch(/api=automation/);
   });
 
   it("keeps the Portal API selected when changing to a version that is not split", async () => {
@@ -453,13 +455,32 @@ describe("Portal API split into one entry per portal", () => {
     expect(apiSelect().value).toBe("portal");
   });
 
+  it("opens the Classic Portal when changing to a split version on a link to a classic operation", async () => {
+    stubFetch(specFound);
+    history.replaceState(null, "", "?v=4.13&api=portal#/operations/getApis");
+    const app = createApp();
+    await app.init();
+
+    versionSelect().value = "4.14";
+    app.onVersionChange();
+    expect(await renderedOperationIds()).toEqual(["getApis", "searchApis"]);
+    expect(apiSelect().value).toBe("portal-classic");
+    expect(window.location.search).toMatch(/api=portal-classic/);
+  });
+
   it("falls back to the spec URL when the Portal spec cannot be loaded", async () => {
     stubFetch(() => ({ ok: false, status: 500 }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     history.replaceState(null, "", "?api=portal-next");
     await createApp().init();
 
     await vi.waitFor(() => expect(renderedApi()).not.toBeNull());
     expect(renderedApi().getAttribute("apiDescriptionUrl")).toBe("specs/4.14.0/portal.yaml");
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("specs/4.14.0/portal.yaml"),
+      expect.objectContaining({ message: "HTTP 500 on specs/4.14.0/portal.yaml" }),
+    );
+    warn.mockRestore();
   });
 
   it("keeps passing the spec URL for the other APIs", async () => {

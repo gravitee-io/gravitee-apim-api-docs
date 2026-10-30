@@ -288,7 +288,10 @@ export const createApp = () => {
             el.setAttribute("apiDescriptionDocument", JSON.stringify(filtered)),
           );
         })
-        .catch(mountFromUrl);
+        .catch((error) => {
+          console.warn(`Showing every Portal API operation: could not filter ${specUrl} by portal.`, error);
+          mountFromUrl();
+        });
     } else {
       mountFromUrl();
     }
@@ -305,9 +308,10 @@ export const createApp = () => {
     return globalThis.jsyaml.load(await res.text());
   };
 
-  // On page load, a deep link to an operation of the other portal opens that
-  // portal, so links written before the split keep landing on their
-  // operation. Later renders follow the user's pick instead.
+  // On page load, or on a version change that turned the Portal API into its
+  // per-portal entries, a deep link to an operation of the other portal opens
+  // that portal, so links written before the split keep landing on their
+  // operation. Renders that follow the user's pick of a portal keep it.
   const portalViewOf = (versionObj, api, spec) => {
     const operationId = window.location.hash.match(/^#\/operations\/([^/?]+)/)?.[1];
     const portal = operationId && portalOfOperation(spec, operationId);
@@ -332,7 +336,7 @@ export const createApp = () => {
       apiSelect.options[0]?.value;
     if (apiId) apiSelect.value = apiId;
 
-    renderApi(newVersion, apiId);
+    renderApi(newVersion, apiId, apiId !== previousApiId);
     setSearch(minor, apiId);
   };
 

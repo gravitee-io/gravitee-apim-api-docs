@@ -176,8 +176,8 @@ fixed = [
 ]
 # From 4.14, each Portal API operation declares the developer portal that
 # calls it (x-gravitee-portal). Such a spec gets one entry per portal, which
-# the front-end filters. The key is matched as an indented YAML key, so a
-# description that merely mentions it does not count.
+# the front-end filters. The key is matched at the start of an indented
+# line, so an inline mention in a description does not count.
 portal_entries = [
     ('portal-next',    'Next Gen Portal', 'next'),
     ('portal-classic', 'Classic Portal',  'classic'),
