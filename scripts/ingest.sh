@@ -101,6 +101,15 @@ for entry in "${MODULES[@]}"; do
   fetch_jar "$g" "$a"
 done
 
+# From 4.13, the Management v2 specs live in their own -model jar instead of
+# the -rest one. Older versions never published it, so a failed download only
+# means we read the specs from the -rest jar as before.
+V2_MODEL="io.gravitee.apim.rest.api.management.v2:gravitee-apim-rest-api-management-v2-model"
+IFS=':' read -r g a <<<"$V2_MODEL"
+if ! fetch_jar "$g" "$a" >/dev/null 2>&1; then
+  echo "  [fetch] $a not published at $CORE_VERSION, reading v2 specs from the -rest jar"
+fi
+
 # --- 5. Extract the yaml files from each jar ------------------------------
 #
 # Predicted jar paths in $TMP (Maven names them <artifactId>-<version>.jar
@@ -108,7 +117,8 @@ done
 JAR_AUTO="$TMP/gravitee-apim-rest-api-automation-rest-$CORE_VERSION.jar"
 JAR_PORTAL="$TMP/gravitee-apim-rest-api-portal-rest-$CORE_VERSION.jar"
 JAR_MGMT="$TMP/gravitee-apim-rest-api-management-rest-$CORE_VERSION.jar"
-JAR_V2="$TMP/gravitee-apim-rest-api-management-v2-rest-$CORE_VERSION.jar"
+JAR_V2="$TMP/gravitee-apim-rest-api-management-v2-model-$CORE_VERSION.jar"
+[[ -f "$JAR_V2" ]] || JAR_V2="$TMP/gravitee-apim-rest-api-management-v2-rest-$CORE_VERSION.jar"
 
 # `unzip -j` flattens directories (we don't want jar internals on disk).
 # `-o` overwrites without prompting. We rename each file to a stable name
