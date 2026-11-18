@@ -23,10 +23,7 @@ python3 -m http.server 8080
 
 ## Ingest a new version
 
-The Automation merge runs on Node, so install its dependencies once:
-
 ```bash
-npm ci
 ./scripts/ingest.sh <version> [core-version]
 # example:
 ./scripts/ingest.sh 4.11.5
@@ -38,11 +35,10 @@ The script downloads the four APIM REST API jars from Maven (Gravitee Nexus / Ma
 
 The jars belong to APIM's core reactor, which releases apart from the product from 4.13 on: the specs of product `4.13.4` may well sit in core `4.13.1`. The second argument says which number to download; the site keeps publishing under the first. Leave it out and the two are the same, which is what every version up to 4.12 does.
 
-From 4.13, a running APIM merges into the Automation spec the fragment of each Gamma module it loads, such as the `/aim/…` and `/authz/…` paths. The script does the same at ingest:
-- It reads the module versions pinned in `gravitee-apim-distribution/pom.xml` at the product tag of the public APIM repository.
-- It downloads those module zips from the Azure feed and merges each module's `openapi/openapi-automation.yaml` with `scripts/merge-automation.mjs`.
-- The merge follows the rules of APIM's `OpenApiFragmentMerger`.
-- A core without that merger keeps its Automation spec unmerged.
+A running APIM merges into the Automation spec the fragment of each Gamma module it loads, such as the `/aim/…` and `/authz/…` paths. The script does the same at ingest, from 4.14:
+- It reads the module versions pinned by the release in its distribution pom, `io.gravitee.apim.distribution:gravitee-apim-distribution:<version>:pom`, from the Azure feed.
+- It downloads those module zips from the Azure feed and merges each module's `openapi/openapi-automation.yaml` by running the core's own `OpenApiFragmentMerger` from the automation-rest jar, with the Jackson versions of the core's `gravitee-apim-bom`. Running a 4.14 core takes Java 25.
+- A core whose merger has no `main` method, which is every core before 4.14, keeps its Automation spec unmerged.
 
 ## APIs included
 

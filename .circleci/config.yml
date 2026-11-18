@@ -59,8 +59,8 @@ commands:
 jobs:
     ingest:
         docker:
-            # -node: the Automation spec merge (scripts/merge-automation.mjs) runs on Node.
-            - image: cimg/openjdk:17.0-node
+            # 25: the Automation spec merge runs the core's OpenApiFragmentMerger, built for Java 25.
+            - image: cimg/openjdk:25.0
         environment:
             VERSION: << pipeline.parameters.version >>
             CORE_VERSION: << pipeline.parameters.core_version >>
@@ -91,10 +91,6 @@ jobs:
                       if [ -d publish/specs ]; then
                           cp -a publish/specs/. specs/
                       fi
-
-            - run:
-                  name: Install the merge script dependencies
-                  command: npm ci
 
             - run:
                   name: Ingest APIM $VERSION
