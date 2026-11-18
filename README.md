@@ -35,10 +35,10 @@ The script downloads the four APIM REST API jars from Maven (Gravitee Nexus / Ma
 
 The jars belong to APIM's core reactor, which releases apart from the product from 4.13 on: the specs of product `4.13.4` may well sit in core `4.13.1`. The second argument says which number to download; the site keeps publishing under the first. Leave it out and the two are the same, which is what every version up to 4.12 does.
 
-A running APIM merges into the Automation spec the fragment of each Gamma module it loads, such as the `/aim/…` and `/authz/…` paths. The script does the same at ingest, from 4.14:
-- It reads the module versions pinned by the release in its distribution pom, `io.gravitee.apim.distribution:gravitee-apim-distribution:<version>:pom`, from the Azure feed.
-- It downloads those module zips from the Azure feed and merges each module's `openapi/openapi-automation.yaml` by running the core's own `OpenApiFragmentMerger` from the automation-rest jar, with the Jackson versions of the core's `gravitee-apim-bom`. Running a 4.14 core takes Java 25.
-- A core whose merger has no `main` method, which is every core before 4.14, keeps its Automation spec unmerged.
+From 4.12, the script also extracts the Gamma specs: those of the core's `gravitee-gamma-rest-api` jar, and those of the Gamma modules the release pins:
+- It reads the module versions pinned by the release in its distribution pom, `io.gravitee.apim.distribution:gravitee-apim-distribution:<version>:pom`, and downloads those module zips from the Azure feed. The feed carries that pom from 4.13.5 and 4.14 on, so an earlier release publishes no module spec.
+- It keeps each module's `openapi/openapi-*.yaml` management specs. A module that ships none, such as edge, adds nothing.
+- A running APIM merges into the Automation spec the fragment of each Gamma module it loads, such as the `/aim/…` and `/authz/…` paths. The script merges each module's `openapi/openapi-automation.yaml` the same way, by running the core's own `OpenApiFragmentMerger` from the automation-rest jar, with the Jackson versions of the core's `gravitee-apim-bom`. Running a 4.14 core takes Java 25. A core whose merger has no `main` method, which is every core before 4.14, keeps its Automation spec unmerged.
 
 ## APIs included
 
@@ -46,6 +46,7 @@ A running APIM merges into the Automation spec the fragment of each Gamma module
 - Portal (`portal-openapi.yaml`) — from 4.14, listed twice, as Next Gen Portal and Classic Portal: each entry shows the operations its developer portal calls (`x-gravitee-portal`), and former `api=portal` links open the Next Gen one
 - Management v1 (`console-openapi.yaml`, generated at APIM build time)
 - Management v2 — one entry per domain (`openapi-apis.yaml`, `openapi-plugins.yaml`, …)
+- Gamma, from 4.12 — one entry per spec of the core `gravitee-gamma-rest-api` jar (`openapi/<domain>/openapi-*.yaml`), and one group per Gamma module that ships specs, named after the module's `plugin.properties` description (`Gamma · AI Management`)
 
 ## Automated deployment (CircleCI)
 
