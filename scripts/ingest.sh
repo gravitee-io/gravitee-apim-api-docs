@@ -15,7 +15,9 @@
 #   1. Download 4 published jars from Maven (Gravitee Nexus / Maven Central)
 #      via `mvn dependency:copy` into a tmp dir, at <core-version>.
 #   2. Unzip the OpenAPI yaml files we care about into specs/<version>/.
-#   3. Re-generate specs/versions.json so the static site picks up this version.
+#   3. Merge into the Automation spec the fragments of the Gamma modules the
+#      release pins, downloaded from the Azure feed, as a running APIM does.
+#   4. Re-generate specs/versions.json so the static site picks up this version.
 #
 
 # Strict mode:
@@ -81,6 +83,38 @@ fetch_jar() {
     -Dmdep.stripVersion=false
 }
 
+# Gamma modules are private plugins, published to the Azure feed only, as a
+# zip holding the module jar next to its lib/ dependencies. They do not carry
+# the core's number: each release pins their versions in its distribution pom.
+GAMMA_MODULE_GROUP="com.graviteesource.gamma.module"
+
+# Write one "<module> <version>" line to $1 per Gamma module the release pins.
+# The distribution pom is deployed to no feed, but the product tag of the
+# public APIM repository carries it.
+fetch_gamma_module_pins() {
+  local out=$1 pom="$TMP/gravitee-apim-distribution-pom.xml"
+  curl -fsSL --retry 3 -o "$pom" \
+    "https://raw.githubusercontent.com/gravitee-io/gravitee-api-management/$VERSION/gravitee-apim-distribution/pom.xml"
+  if ! grep -oE '<gravitee-gamma-module-[a-z0-9-]+\.version>[^<]+' "$pom" \
+      | sed -E 's#^<gravitee-gamma-module-([a-z0-9-]+)\.version>#\1 #' > "$out"; then
+    echo "ERROR: the $VERSION distribution pom pins no Gamma module version" >&2
+    return 1
+  fi
+}
+
+# Download a Gamma module zip and extract its module jar to
+# $TMP/gravitee-gamma-module-<module>-<version>.jar.
+fetch_module_jar() {
+  local module=$1 version=$2
+  local a="gravitee-gamma-module-$module"
+  echo "  [fetch] $GAMMA_MODULE_GROUP:$a:$version:zip"
+  mvn -B -q dependency:copy \
+    -Dartifact="${GAMMA_MODULE_GROUP}:${a}:${version}:zip" \
+    -DoutputDirectory="$TMP" \
+    -Dmdep.stripVersion=false </dev/null
+  unzip -p "$TMP/$a-$version.zip" "$a-$version.jar" > "$TMP/$a-$version.jar"
+}
+
 # --- 4. Prepare the destination -------------------------------------------
 
 if [[ "$CORE_VERSION" != "$VERSION" ]]; then
@@ -140,7 +174,38 @@ echo "[extract] management-v2 (excluding *-deprecated.yaml)"
 unzip -j -o "$JAR_V2" "openapi/openapi-*.yaml" -d "$DEST/management-v2" >/dev/null
 find "$DEST/management-v2" -name "openapi-*-deprecated.yaml" -delete
 
-# --- 6. Update specs/versions.json ----------------------------------------
+# --- 6. Merge the Gamma module fragments into the Automation spec ---------
+#
+# A running APIM serves /automation/open-api.yaml merged with the fragment of
+# every Gamma module it loads (OpenApiFragmentMerger, automation-rest). We
+# publish that same document, at the module versions the release pins. A core
+# without the merger serves its spec unmerged, so we leave it as is.
+MERGER_CLASS="io/gravitee/apim/rest/api/automation/openapi/OpenApiFragmentMerger.class"
+if unzip -l "$JAR_AUTO" "$MERGER_CLASS" >/dev/null 2>&1; then
+  echo "[merge] Gamma module fragments into automation.yaml"
+  PINS="$TMP/gamma-module-pins.txt"
+  fetch_gamma_module_pins "$PINS"
+  FRAGMENTS=()
+  while read -r module version; do
+    fetch_module_jar "$module" "$version"
+    jar="$TMP/gravitee-gamma-module-$module-$version.jar"
+    if unzip -l "$jar" "openapi/openapi-automation.yaml" >/dev/null 2>&1; then
+      unzip -p "$jar" "openapi/openapi-automation.yaml" > "$TMP/automation-$module.yaml"
+      FRAGMENTS+=("$module=$TMP/automation-$module.yaml")
+      echo "  [merge] $module $version"
+    else
+      echo "  [merge] $module $version ships no automation fragment"
+    fi
+  done < "$PINS"
+  if (( ${#FRAGMENTS[@]} > 0 )); then
+    node "$ROOT/scripts/merge-automation.mjs" "$DEST/automation.yaml" "${FRAGMENTS[@]}" > "$TMP/automation.yaml"
+    mv "$TMP/automation.yaml" "$DEST/automation.yaml"
+  fi
+else
+  echo "[merge] core $CORE_VERSION merges no module fragment, automation.yaml stays as is"
+fi
+
+# --- 7. Update specs/versions.json ----------------------------------------
 #
 # This is the single source of truth read by the front-end (assets/app.js).
 # Format:
