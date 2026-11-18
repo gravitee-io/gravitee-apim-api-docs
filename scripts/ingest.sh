@@ -16,7 +16,8 @@
 #      via `mvn dependency:copy` into a tmp dir, at <core-version>.
 #   2. Unzip the OpenAPI yaml files we care about into specs/<version>/.
 #   3. Merge into the Automation spec the fragments of the Gamma modules the
-#      release pins, downloaded from the Azure feed, as a running APIM does.
+#      release pins, downloaded from the Azure feed, with the core's own
+#      OpenApiFragmentMerger, as a running APIM does.
 #   4. Re-generate specs/versions.json so the static site picks up this version.
 #
 
@@ -89,12 +90,19 @@ fetch_jar() {
 GAMMA_MODULE_GROUP="com.graviteesource.gamma.module"
 
 # Write one "<module> <version>" line to $1 per Gamma module the release pins.
-# The distribution pom is deployed to no feed, but the product tag of the
-# public APIM repository carries it.
+# The distribution pom carries the product's number and is deployed to the
+# Azure feed from 4.14 on.
 fetch_gamma_module_pins() {
-  local out=$1 pom="$TMP/gravitee-apim-distribution-pom.xml"
-  curl -fsSL --retry 3 -o "$pom" \
-    "https://raw.githubusercontent.com/gravitee-io/gravitee-api-management/$VERSION/gravitee-apim-distribution/pom.xml"
+  local out=$1 a="gravitee-apim-distribution"
+  local pom="$TMP/$a-$VERSION.pom"
+  echo "  [fetch] io.gravitee.apim.distribution:$a:$VERSION:pom"
+  if ! mvn -B -q dependency:copy \
+      -Dartifact="io.gravitee.apim.distribution:${a}:${VERSION}:pom" \
+      -DoutputDirectory="$TMP" \
+      -Dmdep.stripVersion=false </dev/null; then
+    echo "ERROR: the $VERSION distribution pom, which pins the Gamma modules, is not published" >&2
+    return 1
+  fi
   if ! grep -oE '<gravitee-gamma-module-[a-z0-9-]+\.version>[^<]+' "$pom" \
       | sed -E 's#^<gravitee-gamma-module-([a-z0-9-]+)\.version>#\1 #' > "$out"; then
     echo "ERROR: the $VERSION distribution pom pins no Gamma module version" >&2
@@ -113,6 +121,39 @@ fetch_module_jar() {
     -DoutputDirectory="$TMP" \
     -Dmdep.stripVersion=false </dev/null
   unzip -p "$TMP/$a-$version.zip" "$a-$version.jar" > "$TMP/$a-$version.jar"
+}
+
+# Write to $1 the classpath OpenApiFragmentMerger runs with: its Jackson YAML
+# dependencies, at the versions the core's BOM manages, so the merge matches
+# the one a running APIM performs.
+fetch_merger_classpath() {
+  local out=$1 pom="$TMP/merger-classpath-pom.xml"
+  cat > "$pom" <<EOF
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>io.gravitee.apim.docs</groupId>
+  <artifactId>automation-merger-classpath</artifactId>
+  <version>0</version>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>io.gravitee.apim</groupId>
+        <artifactId>gravitee-apim-bom</artifactId>
+        <version>$CORE_VERSION</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+  <dependencies>
+    <dependency>
+      <groupId>com.fasterxml.jackson.dataformat</groupId>
+      <artifactId>jackson-dataformat-yaml</artifactId>
+    </dependency>
+  </dependencies>
+</project>
+EOF
+  mvn -B -q -f "$pom" dependency:build-classpath -Dmdep.outputFile="$out" </dev/null
 }
 
 # --- 4. Prepare the destination -------------------------------------------
@@ -178,10 +219,11 @@ find "$DEST/management-v2" -name "openapi-*-deprecated.yaml" -delete
 #
 # A running APIM serves /automation/open-api.yaml merged with the fragment of
 # every Gamma module it loads (OpenApiFragmentMerger, automation-rest). We
-# publish that same document, at the module versions the release pins. A core
-# without the merger serves its spec unmerged, so we leave it as is.
-MERGER_CLASS="io/gravitee/apim/rest/api/automation/openapi/OpenApiFragmentMerger.class"
-if unzip -l "$JAR_AUTO" "$MERGER_CLASS" >/dev/null 2>&1; then
+# publish that same document, at the module versions the release pins, by
+# running that class from the core jar. A core whose merger has no main method
+# predates this ingest, so its spec stays unmerged.
+MERGER="io.gravitee.apim.rest.api.automation.openapi.OpenApiFragmentMerger"
+if javap -cp "$JAR_AUTO" "$MERGER" 2>/dev/null | grep -qF 'public static void main(java.lang.String[])'; then
   echo "[merge] Gamma module fragments into automation.yaml"
   PINS="$TMP/gamma-module-pins.txt"
   fetch_gamma_module_pins "$PINS"
@@ -198,11 +240,13 @@ if unzip -l "$JAR_AUTO" "$MERGER_CLASS" >/dev/null 2>&1; then
     fi
   done < "$PINS"
   if (( ${#FRAGMENTS[@]} > 0 )); then
-    node "$ROOT/scripts/merge-automation.mjs" "$DEST/automation.yaml" "${FRAGMENTS[@]}" > "$TMP/automation.yaml"
+    fetch_merger_classpath "$TMP/merger-classpath.txt"
+    java -cp "$JAR_AUTO:$(cat "$TMP/merger-classpath.txt")" "$MERGER" \
+      "$DEST/automation.yaml" "${FRAGMENTS[@]}" > "$TMP/automation.yaml"
     mv "$TMP/automation.yaml" "$DEST/automation.yaml"
   fi
 else
-  echo "[merge] core $CORE_VERSION merges no module fragment, automation.yaml stays as is"
+  echo "[merge] core $CORE_VERSION has no command-line merger, automation.yaml stays as is"
 fi
 
 # --- 7. Update specs/versions.json ----------------------------------------
