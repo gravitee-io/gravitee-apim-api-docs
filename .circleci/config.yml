@@ -2,6 +2,7 @@ version: 2.1
 
 orbs:
     keeper: gravitee-io/keeper@0.7.0
+    slack: circleci/slack@4.12.5
 
 parameters:
     version:
@@ -59,7 +60,8 @@ commands:
 jobs:
     ingest:
         docker:
-            - image: cimg/openjdk:17.0
+            # 25: the Automation spec merge runs the core's OpenApiFragmentMerger, built for Java 25.
+            - image: cimg/openjdk:25.0
         environment:
             VERSION: << pipeline.parameters.version >>
             CORE_VERSION: << pipeline.parameters.core_version >>
@@ -82,6 +84,12 @@ jobs:
                       export AZURE_CLIENT_SECRET=$(ksm secret notation keeper://UryantA7MvZe8fkWwcUt8g/field/password)
                       export AZURE_TENANT=$(ksm secret notation keeper://UryantA7MvZe8fkWwcUt8g/custom_field/tenant)
                       ./scripts/setup-maven-feed.sh
+
+            # APIM's release pipeline triggers this one without waiting for it, so a failed
+            # ingest, which publishes nothing for the version, has to say so in Slack.
+            - keeper/env-export:
+                  secret-url: keeper://ZOz4db245GNaETVwmPBk8w/field/password
+                  var-name: SLACK_ACCESS_TOKEN
 
             - run:
                   name: Carry forward previously-published specs into working tree
@@ -132,6 +140,11 @@ jobs:
                           exit 0
                       fi
                       git push origin gh-pages
+
+            - slack/notify:
+                  channel: C02JENTV2AX # api-management-team-notifications, as for APIM's own CI failures
+                  event: fail
+                  template: basic_fail_1
 
     # Deploys index.html + assets/ from main onto gh-pages without touching specs/.
     # This lets UI/style fixes ship immediately, instead of waiting for the next
