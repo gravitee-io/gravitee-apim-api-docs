@@ -91,7 +91,7 @@ GAMMA_MODULE_GROUP="com.graviteesource.gamma.module"
 
 # Write one "<module> <version>" line to $1 per Gamma module the release pins.
 # The distribution pom carries the product's number and is deployed to the
-# Azure feed from 4.14 on.
+# Azure feed from 4.13.5 and 4.14 on.
 fetch_gamma_module_pins() {
   local out=$1 a="gravitee-apim-distribution"
   local pom="$TMP/$a-$VERSION.pom"
