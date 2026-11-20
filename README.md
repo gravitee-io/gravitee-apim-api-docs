@@ -51,7 +51,7 @@ A running APIM merges into the Automation spec the fragment of each Gamma module
 
 Two workflows in `.circleci/config.yml`:
 
-1. **`ingest`** — triggered by an external API call (typically from APIM's release pipeline) with a `version` parameter, and optionally a `core_version` one when the jars carry another number. Runs the ingest script, syncs the result onto `gh-pages`, and commits as `gravitee-bot`. Can also be triggered manually from the CircleCI UI. The job first polls Maven Central for up to one hour to wait for Sonatype's release to propagate; this absorbs the typical 10–30 min sync delay between an APIM release and the artifact becoming downloadable.
+1. **`ingest`** — triggered by an external API call (typically from APIM's release pipeline) with a `version` parameter, and optionally a `core_version` one when the jars carry another number. Runs the ingest script, syncs the result onto `gh-pages`, and commits as `gravitee-bot`. A failure, which publishes nothing for the version, posts to the APIM team's Slack notification channel. Can also be triggered manually from the CircleCI UI. The job first polls Maven Central for up to one hour to wait for Sonatype's release to propagate; this absorbs the typical 10–30 min sync delay between an APIM release and the artifact becoming downloadable.
 2. **`deploy-static`** — triggered on every push to `main`. Syncs `index.html` and `assets/` onto `gh-pages` without touching `specs/`, so UI changes ship immediately.
 
 ### Triggering an ingestion manually
