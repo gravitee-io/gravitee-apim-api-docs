@@ -67,6 +67,13 @@ jobs:
             CORE_VERSION: << pipeline.parameters.core_version >>
             DRY_RUN: << pipeline.parameters.dry_run >>
         steps:
+            # APIM's release pipeline triggers this one without waiting for it, so a failed
+            # ingest, which publishes nothing for the version, has to say so in Slack. The
+            # token comes first: a step only runs when every earlier one passed, and the
+            # notification needs it whichever step fails.
+            - keeper/env-export:
+                  secret-url: keeper://ZOz4db245GNaETVwmPBk8w/field/password
+                  var-name: SLACK_ACCESS_TOKEN
             - setup-bot-and-gh-pages-worktree
 
             # No wait before the ingest: this pipeline is triggered once the release job has
@@ -84,12 +91,6 @@ jobs:
                       export AZURE_CLIENT_SECRET=$(ksm secret notation keeper://UryantA7MvZe8fkWwcUt8g/field/password)
                       export AZURE_TENANT=$(ksm secret notation keeper://UryantA7MvZe8fkWwcUt8g/custom_field/tenant)
                       ./scripts/setup-maven-feed.sh
-
-            # APIM's release pipeline triggers this one without waiting for it, so a failed
-            # ingest, which publishes nothing for the version, has to say so in Slack.
-            - keeper/env-export:
-                  secret-url: keeper://ZOz4db245GNaETVwmPBk8w/field/password
-                  var-name: SLACK_ACCESS_TOKEN
 
             - run:
                   name: Carry forward previously-published specs into working tree
