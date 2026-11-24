@@ -14,10 +14,11 @@
 # Pipeline overview:
 #   1. Download 4 published jars from Maven (Gravitee Nexus / Maven Central)
 #      via `mvn dependency:copy` into a tmp dir, at <core-version>.
-#   2. Unzip the OpenAPI yaml files we care about into specs/<version>/.
-#   3. Merge into the Automation spec the fragments of the Gamma modules the
-#      release pins, downloaded from the Azure feed, with the core's own
-#      OpenApiFragmentMerger, as a running APIM does.
+#   2. Unzip the OpenAPI yaml files we care about into specs/<version>/,
+#      Gamma's included from 4.12.
+#   3. Download the Gamma modules the release pins from the Azure feed, keep
+#      their specs, and merge their Automation fragments into the Automation
+#      spec with the core's own OpenApiFragmentMerger, as a running APIM does.
 #   4. Re-generate specs/versions.json so the static site picks up this version.
 #
 
@@ -89,25 +90,29 @@ fetch_jar() {
 # the core's number: each release pins their versions in its distribution pom.
 GAMMA_MODULE_GROUP="com.graviteesource.gamma.module"
 
+# Gamma ships with the core from 4.12 on.
+gamma_era() {
+  [[ "$(printf '%s\n' 4.12 "$CORE_VERSION" | sort -V | head -1)" == "4.12" ]]
+}
+
 # Write one "<module> <version>" line to $1 per Gamma module the release pins.
 # The distribution pom carries the product's number and is deployed to the
-# Azure feed from 4.13.5 and 4.14 on.
+# Azure feed from 4.13.5 and 4.14 on. An earlier release, or one that pins
+# no module (4.12), writes none.
 fetch_gamma_module_pins() {
   local out=$1 a="gravitee-apim-distribution"
   local pom="$TMP/$a-$VERSION.pom"
+  : > "$out"
   echo "  [fetch] io.gravitee.apim.distribution:$a:$VERSION:pom"
   if ! mvn -B -q dependency:copy \
       -Dartifact="io.gravitee.apim.distribution:${a}:${VERSION}:pom" \
       -DoutputDirectory="$TMP" \
-      -Dmdep.stripVersion=false </dev/null; then
-    echo "ERROR: the $VERSION distribution pom, which pins the Gamma modules, is not published" >&2
-    return 1
+      -Dmdep.stripVersion=false </dev/null >/dev/null 2>&1; then
+    echo "  [fetch] the $VERSION distribution pom is not published, so no Gamma module"
+    return 0
   fi
-  if ! grep -oE '<gravitee-gamma-module-[a-z0-9-]+\.version>[^<]+' "$pom" \
-      | sed -E 's#^<gravitee-gamma-module-([a-z0-9-]+)\.version>#\1 #' > "$out"; then
-    echo "ERROR: the $VERSION distribution pom pins no Gamma module version" >&2
-    return 1
-  fi
+  grep -oE '<gravitee-gamma-module-[a-z0-9-]+\.version>[^<]+' "$pom" \
+    | sed -E 's#^<gravitee-gamma-module-([a-z0-9-]+)\.version>#\1 #' > "$out" || true
 }
 
 # Download a Gamma module zip and extract its module jar to
@@ -185,6 +190,11 @@ if ! fetch_jar "$g" "$a" >/dev/null 2>&1; then
   echo "  [fetch] $a not published at $CORE_VERSION, reading v2 specs from the -rest jar"
 fi
 
+# Gamma ships with the core from 4.12 on, its REST API in a jar of its own.
+if gamma_era; then
+  fetch_jar "io.gravitee.gamma" "gravitee-gamma-rest-api"
+fi
+
 # --- 5. Extract the yaml files from each jar ------------------------------
 #
 # Predicted jar paths in $TMP (Maven names them <artifactId>-<version>.jar
@@ -215,7 +225,51 @@ echo "[extract] management-v2 (excluding *-deprecated.yaml)"
 unzip -j -o "$JAR_V2" "openapi/openapi-*.yaml" -d "$DEST/management-v2" >/dev/null
 find "$DEST/management-v2" -name "openapi-*-deprecated.yaml" -delete
 
-# --- 6. Merge the Gamma module fragments into the Automation spec ---------
+# Gamma ships one spec per domain, under openapi/<domain>/ (observability,
+# credentials, ...). The file names are unique, so the domains are flattened.
+if gamma_era; then
+  echo "[extract] gamma"
+  unzip -j -o "$TMP/gravitee-gamma-rest-api-$CORE_VERSION.jar" "openapi/*/openapi-*.yaml" -d "$DEST/gamma" >/dev/null
+fi
+
+# --- 6. Gamma modules ------------------------------------------------------
+#
+# Each module the release pins ships its management specs as
+# openapi/openapi-*.yaml in its jar, published under gamma/modules/<module>/,
+# and may ship openapi/openapi-automation.yaml, a fragment of the Automation
+# spec merged in step 7. MODULE_NAMES maps each module with specs to the name
+# the site shows, taken from the description of its plugin.properties.
+PINS="$TMP/gamma-module-pins.txt"
+MODULE_NAMES="$TMP/gamma-module-names.tsv"
+: > "$PINS"
+: > "$MODULE_NAMES"
+FRAGMENTS=()
+if gamma_era; then
+  echo "[modules] Gamma modules pinned by $VERSION"
+  fetch_gamma_module_pins "$PINS"
+  while read -r module version; do
+    fetch_module_jar "$module" "$version"
+    jar="$TMP/gravitee-gamma-module-$module-$version.jar"
+    if unzip -Z1 "$jar" "openapi/openapi-*.yaml" 2>/dev/null | grep -v '^openapi/openapi-automation\.yaml$' >/dev/null; then
+      mkdir -p "$DEST/gamma/modules/$module"
+      unzip -j -o "$jar" "openapi/openapi-*.yaml" -d "$DEST/gamma/modules/$module" >/dev/null
+      rm -f "$DEST/gamma/modules/$module/openapi-automation.yaml"
+      description=$(unzip -p "$jar" plugin.properties 2>/dev/null | sed -n 's/^description=//p' | head -1 || true)
+      name="${description% module for Gravitee Gamma}"
+      printf '%s\t%s\n' "$module" "${name:-$module}" >> "$MODULE_NAMES"
+      echo "  [modules] $module $version: management specs"
+    else
+      echo "  [modules] $module $version: no management spec"
+    fi
+    if unzip -l "$jar" "openapi/openapi-automation.yaml" >/dev/null 2>&1; then
+      unzip -p "$jar" "openapi/openapi-automation.yaml" > "$TMP/automation-$module.yaml"
+      FRAGMENTS+=("$module=$TMP/automation-$module.yaml")
+      echo "  [modules] $module $version: automation fragment"
+    fi
+  done < "$PINS"
+fi
+
+# --- 7. Merge the Gamma module fragments into the Automation spec ---------
 #
 # A running APIM serves /automation/open-api.yaml merged with the fragment of
 # every Gamma module it loads (OpenApiFragmentMerger, automation-rest). We
@@ -224,22 +278,12 @@ find "$DEST/management-v2" -name "openapi-*-deprecated.yaml" -delete
 # predates this ingest, so its spec stays unmerged.
 MERGER="io.gravitee.apim.rest.api.automation.openapi.OpenApiFragmentMerger"
 if javap -cp "$JAR_AUTO" "$MERGER" 2>/dev/null | grep -qF 'public static void main(java.lang.String[])'; then
-  echo "[merge] Gamma module fragments into automation.yaml"
-  PINS="$TMP/gamma-module-pins.txt"
-  fetch_gamma_module_pins "$PINS"
-  FRAGMENTS=()
-  while read -r module version; do
-    fetch_module_jar "$module" "$version"
-    jar="$TMP/gravitee-gamma-module-$module-$version.jar"
-    if unzip -l "$jar" "openapi/openapi-automation.yaml" >/dev/null 2>&1; then
-      unzip -p "$jar" "openapi/openapi-automation.yaml" > "$TMP/automation-$module.yaml"
-      FRAGMENTS+=("$module=$TMP/automation-$module.yaml")
-      echo "  [merge] $module $version"
-    else
-      echo "  [merge] $module $version ships no automation fragment"
-    fi
-  done < "$PINS"
+  if [[ ! -s "$PINS" ]]; then
+    echo "ERROR: core $CORE_VERSION merges module fragments, but no Gamma module pin is published for $VERSION" >&2
+    exit 1
+  fi
   if (( ${#FRAGMENTS[@]} > 0 )); then
+    echo "[merge] Gamma module fragments into automation.yaml"
     fetch_merger_classpath "$TMP/merger-classpath.txt"
     java -cp "$JAR_AUTO:$(cat "$TMP/merger-classpath.txt")" "$MERGER" \
       "$DEST/automation.yaml" "${FRAGMENTS[@]}" > "$TMP/automation.yaml"
@@ -249,7 +293,7 @@ else
   echo "[merge] core $CORE_VERSION has no command-line merger, automation.yaml stays as is"
 fi
 
-# --- 7. Update specs/versions.json ----------------------------------------
+# --- 8. Update specs/versions.json ----------------------------------------
 #
 # This is the single source of truth read by the front-end (assets/app.js).
 # Format:
@@ -268,11 +312,11 @@ fi
 #   3. Append the new entry, sort versions semver-style, set "latest".
 #   4. Write the manifest back.
 echo "[manifest] update $MANIFEST"
-python3 - "$MANIFEST" "$VERSION" "$DEST" <<'PY'
+python3 - "$MANIFEST" "$VERSION" "$DEST" "$MODULE_NAMES" <<'PY'
 import json, os, re, sys
 from datetime import date
 
-manifest_path, version, dest = sys.argv[1:]
+manifest_path, version, dest, module_names_path = sys.argv[1:]
 
 # Pretty-print a management-v2 file name into a human label.
 # "openapi-api-products.yaml" -> "API Products"
@@ -283,6 +327,7 @@ def label_from(filename):
     s = ' '.join(parts)
     # Acronym fixes (Title-case mangles them).
     s = s.replace('Apis', 'APIs').replace('Ui', 'UI').replace('Api ', 'API ')
+    s = re.sub(r'\bAi\b', 'AI', s)
     return s
 
 apis = []
@@ -326,6 +371,30 @@ if os.path.isdir(v2_dir):
             'spec': f'{version}/management-v2/{fname}',
             'group': 'Management v2',  # used by the front-end to render an <optgroup>
         })
+
+# Gamma: the core specs form one group, and each module with specs another,
+# named after the module. Like management-v2, the files are discovered.
+def gamma_entries(directory, spec_prefix, id_prefix, group):
+    for fname in sorted(os.listdir(directory)):
+        if not fname.endswith('.yaml'):
+            continue
+        slug = re.sub(r'^openapi-|\.yaml$', '', fname)
+        apis.append({
+            'id': f'{id_prefix}-{slug}',
+            'label': label_from(fname),
+            'spec': f'{version}/{spec_prefix}/{fname}',
+            'group': group,
+        })
+
+gamma_dir = os.path.join(dest, 'gamma')
+if os.path.isdir(gamma_dir):
+    gamma_entries(gamma_dir, 'gamma', 'gamma', 'Gamma')
+
+with open(module_names_path) as f:
+    module_names = dict(line.rstrip('\n').split('\t', 1) for line in f if line.strip())
+for module in sorted(module_names):
+    gamma_entries(os.path.join(gamma_dir, 'modules', module), f'gamma/modules/{module}',
+                  f'gamma-{module}', f'Gamma · {module_names[module]}')
 
 # Load existing manifest (may be empty on first run).
 with open(manifest_path) as f:
